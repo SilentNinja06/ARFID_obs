@@ -10,6 +10,7 @@ import {
 	STATUS_LABELS,
 	isConsumed,
 	isExpansionShift,
+	statusDotClass,
 } from "./types";
 import { renderBars, renderLineChart, SeriesPoint } from "./charts";
 import { exportCsv, exportSummary } from "./export";
@@ -309,8 +310,8 @@ export class ArfidDashboardView extends ItemView {
 		const row = parent.createDiv({ cls: "arfid-entry-row" });
 		row.createSpan({ cls: "arfid-entry-when", text: `${e.date} ${e.time}`.trim() });
 		const main = row.createSpan({ cls: "arfid-entry-main" });
-		main.createSpan({ cls: `arfid-status-dot arfid-status-${e.status}` });
-		main.createSpan({ text: showFood ? e.food : STATUS_LABELS[e.status] });
+		main.createSpan({ cls: `arfid-status-dot ${statusDotClass(e.status)}` });
+		main.createSpan({ text: showFood ? e.food : e.status ? STATUS_LABELS[e.status] : "logged" });
 		if (e.kind === "exposure") {
 			const step = e.exposureStep ? EXPOSURE_STEP_LABELS[e.exposureStep].toLowerCase() : "";
 			row.createSpan({ cls: "arfid-entry-outcome", text: step ? `exposure · ${step}` : "exposure" });

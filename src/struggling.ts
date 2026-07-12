@@ -19,7 +19,9 @@ export class StrugglingModal extends ArfidModal {
 
 	protected buildContent(): void {
 		const foods = this.plugin.store.getFoods();
-		this.safeFoods = foods.filter((f) => f.currentStatus === "safe" || f.currentStatus === "recently-expanded");
+		this.safeFoods = foods.filter(
+			(f) => f.currentStatus === "safe" || f.currentStatus === "like" || f.currentStatus === "recently-expanded"
+		);
 		this.notesByFood = this.plugin.store.getFoodNotesByKey();
 		const { contentEl } = this;
 
@@ -75,7 +77,7 @@ export class StrugglingModal extends ArfidModal {
 			text.createSpan({ cls: "arfid-option-meta", text: `last had ${f.lastLogged}` });
 			btn.addEventListener("click", () => {
 				this.close();
-				new QuickLogModal(this.app, this.plugin, { food: f.name, status: f.currentStatus }).open();
+				new QuickLogModal(this.app, this.plugin, { food: f.name }).open();
 			});
 			// if this food has a ritual/order/recipe, offer it right here —
 			// the exact known-good way to eat it matters most on hard days

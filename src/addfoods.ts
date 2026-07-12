@@ -54,7 +54,7 @@ export class AddFoodModal extends ArfidModal {
 		const { contentEl } = this;
 		contentEl.createDiv({
 			cls: "arfid-hint",
-			text: "Nothing is logged as eaten — this just adds the food with a status.",
+			text: "Nothing is logged as eaten — this just adds the food with a category.",
 		});
 
 		const { input: foodInput } = buildFoodPicker(contentEl, foods, {
@@ -75,7 +75,7 @@ export class AddFoodModal extends ArfidModal {
 		});
 		this.hintEl = contentEl.createDiv({ cls: "arfid-hint" });
 
-		contentEl.createDiv({ cls: "arfid-field-label", text: "Status" });
+		contentEl.createDiv({ cls: "arfid-field-label", text: "Category" });
 		buildStatusRow(contentEl, "", (v) => (this.status = v));
 
 		this.saveBtn = this.addSaveButton("Add food", () => this.save());
@@ -105,7 +105,7 @@ export class AddFoodModal extends ArfidModal {
 			return;
 		}
 		if (!this.status) {
-			new Notice("Pick a status for it.");
+			new Notice("Pick a category for it.");
 			return;
 		}
 		const { date, time } = nowStamp();
@@ -187,10 +187,16 @@ function placeholderFor(status: FoodStatus): string {
 	switch (status) {
 		case "safe":
 			return "chicken nuggets, white rice, pretzels";
-		case "trying":
-			return "cheese curds";
+		case "like":
+			return "cheese pizza";
+		case "neutral":
+			return "water, plain crackers";
+		case "dislike":
+			return "overcooked pasta";
 		case "fear":
 			return "mixed casseroles, mushy vegetables";
+		case "trying":
+			return "cheese curds";
 		case "recently-expanded":
 			return "scrambled eggs";
 	}

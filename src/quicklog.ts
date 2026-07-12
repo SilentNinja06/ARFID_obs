@@ -1,6 +1,5 @@
 import { App, Notice } from "obsidian";
 import {
-	FoodStatus,
 	FoodSummary,
 	MEAL_LABELS,
 	MEAL_TYPES,
@@ -17,18 +16,19 @@ import {
 import { nowStamp } from "./store";
 import { buildEntryNote } from "./serialize";
 import { saveEntryNote } from "./files";
-import { buildChipPicker, buildChoiceRow, buildFoodPicker, buildStatusRow, buildStrategySection } from "./chips";
+import { buildChipPicker, buildChoiceRow, buildFoodPicker, buildStrategySection } from "./chips";
 import { ArfidModal } from "./modal";
+import { StatusChangeModal } from "./statuschange";
 import type ArfidTrackerPlugin from "./main";
 
 export interface QuickLogPrefill {
 	food?: string;
-	status?: FoodStatus;
 	meal?: MealType;
 }
 
-/** Quick-log modal: food name with autocomplete, meal/status/outcome chips,
- * everything else behind an "Add details" disclosure. Designed for
+/** Quick-log modal: food name with autocomplete, meal/outcome chips,
+ * everything else behind an "Add details" disclosure. Logging never touches
+ * a food's category — that's a deliberate, separate action. Designed for
  * one-handed use — every control is a ≥44px tap target. */
 export class QuickLogModal extends ArfidModal {
 	private foods: FoodSummary[] = [];
@@ -36,18 +36,14 @@ export class QuickLogModal extends ArfidModal {
 
 	private foodName = "";
 	private meal: MealType = "";
-	private status: FoodStatus = "trying";
-	private statusTouched = false;
 	private outcome: Outcome | "" = "full";
-	private statusReason = "";
 	private textureNotes = "";
 	private contexts = new Set<string>();
 	private strategies = new Set<string>();
 	private strategyWorked: StrategyWorked = "n/a";
 	private tagsText = "";
 
-	private statusSetter: { set: (v: FoodStatus | "") => void } | null = null;
-	private reasonSection!: HTMLElement;
+	private categoryLine!: HTMLElement;
 
 	constructor(app: App, plugin: ArfidTrackerPlugin, prefill: QuickLogPrefill = {}) {
 		super(app, plugin, "Log a food");
@@ -58,23 +54,18 @@ export class QuickLogModal extends ArfidModal {
 		this.foods = this.plugin.store.getFoods();
 		this.foodName = this.prefill.food ?? "";
 		this.meal = this.prefill.meal ?? guessMealType(new Date());
-		if (this.prefill.status) {
-			this.status = this.prefill.status;
-			this.statusTouched = true;
-		}
 		const { contentEl } = this;
 
 		const { input: foodInput } = buildFoodPicker(contentEl, this.foods, {
-			placeholder: "Food (e.g. scrambled eggs)",
+			placeholder: "Food or drink (e.g. scrambled eggs, water)",
 			initial: this.foodName,
 			onChange: (name) => {
 				this.foodName = name;
-				// follow a known food's current status until the user picks one
-				const known = findFood(this.foods, name);
-				if (known && !this.statusTouched) this.setStatus(known.currentStatus, false);
-				this.updateReasonVisibility();
+				this.updateCategoryLine();
 			},
 		});
+		this.categoryLine = contentEl.createDiv({ cls: "arfid-hint arfid-category-line" });
+		this.updateCategoryLine();
 
 		contentEl.createDiv({ cls: "arfid-field-label", text: "Meal" });
 		buildChoiceRow<Exclude<MealType, "">>(
@@ -84,21 +75,6 @@ export class QuickLogModal extends ArfidModal {
 			(v) => (this.meal = v),
 			true
 		);
-
-		contentEl.createDiv({ cls: "arfid-field-label", text: "Status" });
-		this.statusSetter = buildStatusRow(contentEl, this.status, (v) => {
-			if (v !== "") this.setStatus(v, true);
-		});
-
-		// status change reason (shown when a known food's status changes)
-		this.reasonSection = contentEl.createDiv();
-		this.reasonSection.createDiv({ cls: "arfid-field-label", text: "What changed? (why is this food moving?)" });
-		const reason = this.reasonSection.createEl("textarea", {
-			cls: "arfid-textarea",
-			attr: { rows: "2", placeholder: "The specific thought or moment behind the change — future you will want this." },
-		});
-		reason.addEventListener("input", () => (this.statusReason = reason.value));
-		this.updateReasonVisibility();
 
 		contentEl.createDiv({ cls: "arfid-field-label", text: "Outcome" });
 		buildChoiceRow<Outcome>(
@@ -143,19 +119,20 @@ export class QuickLogModal extends ArfidModal {
 		if (!this.foodName) window.setTimeout(() => foodInput.focus(), 50);
 	}
 
-	private setStatus(s: FoodStatus, touched: boolean): void {
-		this.status = s;
-		if (touched) this.statusTouched = true;
-		this.statusSetter?.set(s);
-		this.updateReasonVisibility();
-	}
-
-	/** Ask "what changed?" only when this entry moves a known food to a new status. */
-	private updateReasonVisibility(): void {
-		if (!this.reasonSection) return;
+	/** Show the known food's category (informational — logging never changes
+	 * it) with a tap-through to the dedicated change flow. */
+	private updateCategoryLine(): void {
+		this.categoryLine.empty();
 		const known = findFood(this.foods, this.foodName);
-		if (known && known.currentStatus !== this.status) this.reasonSection.show();
-		else this.reasonSection.hide();
+		if (!known) return;
+		this.categoryLine.createSpan({
+			text: `Category: ${STATUS_LABELS[known.currentStatus].toLowerCase()} · `,
+		});
+		const change = this.categoryLine.createEl("a", { text: "change" });
+		change.addEventListener("click", () => {
+			this.close();
+			new StatusChangeModal(this.app, this.plugin, known.name).open();
+		});
 	}
 
 	private async save(): Promise<void> {
@@ -166,19 +143,17 @@ export class QuickLogModal extends ArfidModal {
 		}
 		const { date, time } = nowStamp();
 		const strategies = [...this.strategies];
-		const known = findFood(this.foods, food);
-		const isShift = !!known && known.currentStatus !== this.status;
 
 		const note = buildEntryNote({
 			date,
 			time,
 			food,
 			meal: this.meal,
-			status: this.status,
+			status: "", // ordinary logs never assert a category
 			outcome: this.outcome,
 			exposure: false,
 			exposureStep: "",
-			statusReason: isShift ? this.statusReason.trim() : "",
+			statusReason: "",
 			textureNotes: this.textureNotes.trim(),
 			context: [...this.contexts],
 			strategies,
@@ -189,7 +164,7 @@ export class QuickLogModal extends ArfidModal {
 		await this.plugin.saveSettings(); // persist any auto-grown chip lists
 		const mealPrefix = this.meal ? `${this.meal}: ` : "";
 		await saveEntryNote(this.plugin, date, time, food, note, {
-			dailyLabel: `${mealPrefix}${food} — ${STATUS_LABELS[this.status].toLowerCase()}${this.outcome ? ", " + this.outcome : ""}`,
+			dailyLabel: `${mealPrefix}${food}${this.outcome ? " — " + this.outcome : ""}`,
 			notice: `Logged ${food}`,
 		});
 		this.close();

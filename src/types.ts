@@ -1,12 +1,30 @@
 import { TFile } from "obsidian";
 
-export const FOOD_STATUSES = ["safe", "trying", "fear", "recently-expanded"] as const;
+/** A food's category: the acceptance spectrum (safe → like → neutral →
+ * dislike → fear) plus the process states trying and recently-expanded.
+ * Category is a property of the food — set when adding it or through the
+ * dedicated change flow — never re-asserted by ordinary logging. Foods that
+ * were never categorized (water, incidental drinks…) are neutral. */
+export const FOOD_STATUSES = [
+	"safe",
+	"like",
+	"neutral",
+	"dislike",
+	"fear",
+	"trying",
+	"recently-expanded",
+] as const;
 export type FoodStatus = (typeof FOOD_STATUSES)[number];
+
+export const DEFAULT_STATUS: FoodStatus = "neutral";
 
 export const STATUS_LABELS: Record<FoodStatus, string> = {
 	safe: "Safe",
-	trying: "Trying",
+	like: "Like",
+	neutral: "Neutral",
+	dislike: "Dislike",
 	fear: "Fear",
+	trying: "Trying",
 	"recently-expanded": "Recently expanded",
 };
 
@@ -65,6 +83,11 @@ export function isConsumed(e: FoodEntry): boolean {
 	return e.exposure || e.meal !== "" || e.outcome !== "";
 }
 
+/** The dot CSS class for a status, treating uncategorized as neutral. */
+export function statusDotClass(status: FoodStatus | ""): string {
+	return `arfid-status-${status || DEFAULT_STATUS}`;
+}
+
 /** The outcome an exposure step implies, so meal stats stay coherent. */
 export function outcomeForStep(step: ExposureStep): Outcome | "" {
 	if (step === "portion") return "full";
@@ -72,14 +95,26 @@ export function outcomeForStep(step: ExposureStep): Outcome | "" {
 	return "";
 }
 
-/** A shift that counts as food expansion: movement toward trying/safe, or
- * anything newly marked recently-expanded. */
+/** How accepted a food is, for ordering and expansion detection. Process
+ * states sit mid-scale: trying is movement, not yet acceptance. */
+const ACCEPTANCE_RANK: Record<FoodStatus, number> = {
+	fear: 0,
+	dislike: 1,
+	trying: 2,
+	neutral: 2,
+	like: 3,
+	safe: 4,
+	"recently-expanded": 4,
+};
+
+export function acceptanceRank(status: FoodStatus): number {
+	return ACCEPTANCE_RANK[status];
+}
+
+/** A shift that counts as food expansion: movement up the acceptance scale,
+ * or anything newly marked recently-expanded. */
 export function isExpansionShift(s: StatusShift): boolean {
-	return (
-		(s.from === "fear" && s.to !== "fear") ||
-		(s.from === "trying" && (s.to === "safe" || s.to === "recently-expanded")) ||
-		s.to === "recently-expanded"
-	);
+	return acceptanceRank(s.to) > acceptanceRank(s.from) || s.to === "recently-expanded";
 }
 
 export function findFood(foods: FoodSummary[], name: string): FoodSummary | undefined {
@@ -103,7 +138,9 @@ export interface FoodEntry {
 	time: string; // HH:mm
 	food: string;
 	meal: MealType;
-	status: FoodStatus;
+	/** Explicit category assertion, or "" for ordinary logs that leave the
+	 * food's category untouched. */
+	status: FoodStatus | "";
 	outcome: Outcome | "";
 	kind: EntryKind;
 	exposure: boolean;

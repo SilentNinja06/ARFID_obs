@@ -18,7 +18,7 @@ export class StatusChangeModal extends ArfidModal {
 	private currentLine!: HTMLElement;
 
 	constructor(app: App, plugin: ArfidTrackerPlugin, prefillFood?: string) {
-		super(app, plugin, "Change a food's status");
+		super(app, plugin, "Change a food's category");
 		if (prefillFood) this.foodName = prefillFood;
 	}
 
@@ -38,7 +38,7 @@ export class StatusChangeModal extends ArfidModal {
 		this.currentLine = contentEl.createDiv({ cls: "arfid-hint" });
 		this.updateCurrent();
 
-		contentEl.createDiv({ cls: "arfid-field-label", text: "New status" });
+		contentEl.createDiv({ cls: "arfid-field-label", text: "New category" });
 		buildStatusRow(contentEl, "", (v) => (this.status = v));
 
 		contentEl.createDiv({ cls: "arfid-field-label", text: "What changed?" });
@@ -51,7 +51,7 @@ export class StatusChangeModal extends ArfidModal {
 		});
 		reason.addEventListener("input", () => (this.reason = reason.value));
 
-		this.addSaveButton("Save status change", () => this.save());
+		this.addSaveButton("Save category change", () => this.save());
 	}
 
 	private updateCurrent(): void {
@@ -68,7 +68,7 @@ export class StatusChangeModal extends ArfidModal {
 			return;
 		}
 		if (!this.status) {
-			new Notice("Pick the new status.");
+			new Notice("Pick the new category.");
 			return;
 		}
 		const known = findFood(this.foods, food);

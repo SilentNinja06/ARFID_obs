@@ -30,11 +30,23 @@ module.exports = __toCommonJS(main_exports);
 var import_obsidian13 = require("obsidian");
 
 // src/types.ts
-var FOOD_STATUSES = ["safe", "trying", "fear", "recently-expanded"];
+var FOOD_STATUSES = [
+  "safe",
+  "like",
+  "neutral",
+  "dislike",
+  "fear",
+  "trying",
+  "recently-expanded"
+];
+var DEFAULT_STATUS = "neutral";
 var STATUS_LABELS = {
   safe: "Safe",
-  trying: "Trying",
+  like: "Like",
+  neutral: "Neutral",
+  dislike: "Dislike",
   fear: "Fear",
+  trying: "Trying",
   "recently-expanded": "Recently expanded"
 };
 var OUTCOMES = ["full", "partial", "refused", "avoided"];
@@ -70,13 +82,28 @@ function deriveEntryKind(exposure, tags) {
 function isConsumed(e) {
   return e.exposure || e.meal !== "" || e.outcome !== "";
 }
+function statusDotClass(status) {
+  return `arfid-status-${status || DEFAULT_STATUS}`;
+}
 function outcomeForStep(step) {
   if (step === "portion") return "full";
   if (step === "bite" || step === "tasted") return "partial";
   return "";
 }
+var ACCEPTANCE_RANK = {
+  fear: 0,
+  dislike: 1,
+  trying: 2,
+  neutral: 2,
+  like: 3,
+  safe: 4,
+  "recently-expanded": 4
+};
+function acceptanceRank(status) {
+  return ACCEPTANCE_RANK[status];
+}
 function isExpansionShift(s) {
-  return s.from === "fear" && s.to !== "fear" || s.from === "trying" && (s.to === "safe" || s.to === "recently-expanded") || s.to === "recently-expanded";
+  return acceptanceRank(s.to) > acceptanceRank(s.from) || s.to === "recently-expanded";
 }
 function findFood(foods, name) {
   const key = normalizeFoodKey(name);
@@ -377,24 +404,27 @@ var EntryStore = class {
           name: e.food.trim(),
           key,
           entries: [],
-          currentStatus: e.status,
+          currentStatus: DEFAULT_STATUS,
           firstLogged: e.date,
           lastLogged: e.date
         };
         byKey.set(key, f);
       }
       f.entries.push(e);
-      f.currentStatus = e.status;
+      if (e.status) f.currentStatus = e.status;
       f.lastLogged = e.date;
     }
     return [...byKey.values()].sort((a, b) => a.name.localeCompare(b.name));
   }
-  /** Status changes per food, in chronological order across all foods. */
+  /** Category changes per food, in chronological order across all foods.
+   * Only explicit category assertions participate — ordinary logs can't
+   * create a shift. */
   getStatusShifts(foods) {
     const shifts = [];
     for (const food of foods != null ? foods : this.getFoods()) {
       let prev = null;
       for (const e of food.entries) {
+        if (!e.status) continue;
         if (prev !== null && e.status !== prev) {
           shifts.push({ food: food.name, from: prev, to: e.status, date: e.date, reason: e.statusReason });
         }
@@ -498,7 +528,7 @@ function normalizeStatus(value) {
   const s = String(value != null ? value : "").trim().toLowerCase();
   if (FOOD_STATUSES.includes(s)) return s;
   if (s === "expanded" || s === "recently expanded") return "recently-expanded";
-  return "trying";
+  return "";
 }
 function normalizeMeal(value) {
   const s = String(value != null ? value : "").trim().toLowerCase();
@@ -535,7 +565,7 @@ function daysAgoIso(days) {
 }
 
 // src/quicklog.ts
-var import_obsidian5 = require("obsidian");
+var import_obsidian6 = require("obsidian");
 
 // src/serialize.ts
 function needsQuotes(s) {
@@ -564,7 +594,7 @@ function buildEntryNote(f) {
     `time: "${f.time}"`,
     `food: ${yamlString(f.food)}`,
     `meal: ${f.meal ? f.meal : '""'}`,
-    `status: ${f.status}`,
+    `status: ${f.status ? f.status : '""'}`,
     `outcome: ${f.outcome ? f.outcome : '""'}`,
     `exposure: ${f.exposure ? "true" : "false"}`,
     `exposure_step: ${f.exposureStep ? f.exposureStep : '""'}`,
@@ -921,6 +951,91 @@ var ArfidModal = class extends import_obsidian4.Modal {
   }
 };
 
+// src/statuschange.ts
+var import_obsidian5 = require("obsidian");
+var StatusChangeModal = class extends ArfidModal {
+  constructor(app, plugin, prefillFood) {
+    super(app, plugin, "Change a food's category");
+    this.foods = [];
+    this.foodName = "";
+    this.status = "";
+    this.reason = "";
+    if (prefillFood) this.foodName = prefillFood;
+  }
+  buildContent() {
+    this.foods = this.plugin.store.getFoods();
+    const { contentEl } = this;
+    contentEl.createDiv({ cls: "arfid-field-label", text: "Food" });
+    buildFoodPicker(contentEl, this.foods, {
+      placeholder: "Which food?",
+      initial: this.foodName,
+      onChange: (name) => {
+        this.foodName = name;
+        this.updateCurrent();
+      }
+    });
+    this.currentLine = contentEl.createDiv({ cls: "arfid-hint" });
+    this.updateCurrent();
+    contentEl.createDiv({ cls: "arfid-field-label", text: "New category" });
+    buildStatusRow(contentEl, "", (v) => this.status = v);
+    contentEl.createDiv({ cls: "arfid-field-label", text: "What changed?" });
+    const reason = contentEl.createEl("textarea", {
+      cls: "arfid-textarea",
+      attr: {
+        rows: "3",
+        placeholder: "The specific thought or moment behind this \u2014 why was it gained or lost?"
+      }
+    });
+    reason.addEventListener("input", () => this.reason = reason.value);
+    this.addSaveButton("Save category change", () => this.save());
+  }
+  updateCurrent() {
+    const known = findFood(this.foods, this.foodName);
+    this.currentLine.setText(
+      known ? `Currently: ${STATUS_LABELS[known.currentStatus]} (since ${known.lastLogged})` : ""
+    );
+  }
+  async save() {
+    const food = this.foodName.trim();
+    if (!food) {
+      new import_obsidian5.Notice("Add a food name first.");
+      return;
+    }
+    if (!this.status) {
+      new import_obsidian5.Notice("Pick the new category.");
+      return;
+    }
+    const known = findFood(this.foods, food);
+    if (known && known.currentStatus === this.status) {
+      new import_obsidian5.Notice(`${food} is already marked ${STATUS_LABELS[this.status].toLowerCase()}.`);
+      return;
+    }
+    const { date, time } = nowStamp();
+    const note = buildEntryNote({
+      date,
+      time,
+      food,
+      meal: "",
+      status: this.status,
+      outcome: "",
+      exposure: false,
+      exposureStep: "",
+      statusReason: this.reason.trim(),
+      textureNotes: "",
+      context: [],
+      strategies: [],
+      strategyWorked: "n/a",
+      tags: ["status-change"]
+    });
+    const fromLabel = known ? `${STATUS_LABELS[known.currentStatus].toLowerCase()} \u2192 ` : "";
+    await saveEntryNote(this.plugin, date, time, food, note, {
+      dailyLabel: `status: ${food} \u2014 ${fromLabel}${STATUS_LABELS[this.status].toLowerCase()}`,
+      notice: `${food} \u2192 ${STATUS_LABELS[this.status].toLowerCase()}`
+    });
+    this.close();
+  }
+};
+
 // src/quicklog.ts
 var QuickLogModal = class extends ArfidModal {
   constructor(app, plugin, prefill = {}) {
@@ -928,16 +1043,12 @@ var QuickLogModal = class extends ArfidModal {
     this.foods = [];
     this.foodName = "";
     this.meal = "";
-    this.status = "trying";
-    this.statusTouched = false;
     this.outcome = "full";
-    this.statusReason = "";
     this.textureNotes = "";
     this.contexts = /* @__PURE__ */ new Set();
     this.strategies = /* @__PURE__ */ new Set();
     this.strategyWorked = "n/a";
     this.tagsText = "";
-    this.statusSetter = null;
     this.prefill = prefill;
   }
   buildContent() {
@@ -945,21 +1056,17 @@ var QuickLogModal = class extends ArfidModal {
     this.foods = this.plugin.store.getFoods();
     this.foodName = (_a = this.prefill.food) != null ? _a : "";
     this.meal = (_b = this.prefill.meal) != null ? _b : guessMealType(/* @__PURE__ */ new Date());
-    if (this.prefill.status) {
-      this.status = this.prefill.status;
-      this.statusTouched = true;
-    }
     const { contentEl } = this;
     const { input: foodInput } = buildFoodPicker(contentEl, this.foods, {
-      placeholder: "Food (e.g. scrambled eggs)",
+      placeholder: "Food or drink (e.g. scrambled eggs, water)",
       initial: this.foodName,
       onChange: (name) => {
         this.foodName = name;
-        const known = findFood(this.foods, name);
-        if (known && !this.statusTouched) this.setStatus(known.currentStatus, false);
-        this.updateReasonVisibility();
+        this.updateCategoryLine();
       }
     });
+    this.categoryLine = contentEl.createDiv({ cls: "arfid-hint arfid-category-line" });
+    this.updateCategoryLine();
     contentEl.createDiv({ cls: "arfid-field-label", text: "Meal" });
     buildChoiceRow(
       contentEl,
@@ -968,18 +1075,6 @@ var QuickLogModal = class extends ArfidModal {
       (v) => this.meal = v,
       true
     );
-    contentEl.createDiv({ cls: "arfid-field-label", text: "Status" });
-    this.statusSetter = buildStatusRow(contentEl, this.status, (v) => {
-      if (v !== "") this.setStatus(v, true);
-    });
-    this.reasonSection = contentEl.createDiv();
-    this.reasonSection.createDiv({ cls: "arfid-field-label", text: "What changed? (why is this food moving?)" });
-    const reason = this.reasonSection.createEl("textarea", {
-      cls: "arfid-textarea",
-      attr: { rows: "2", placeholder: "The specific thought or moment behind the change \u2014 future you will want this." }
-    });
-    reason.addEventListener("input", () => this.statusReason = reason.value);
-    this.updateReasonVisibility();
     contentEl.createDiv({ cls: "arfid-field-label", text: "Outcome" });
     buildChoiceRow(
       contentEl,
@@ -1017,124 +1112,20 @@ var QuickLogModal = class extends ArfidModal {
     this.addSaveButton("Save entry", () => this.save());
     if (!this.foodName) window.setTimeout(() => foodInput.focus(), 50);
   }
-  setStatus(s, touched) {
-    var _a;
-    this.status = s;
-    if (touched) this.statusTouched = true;
-    (_a = this.statusSetter) == null ? void 0 : _a.set(s);
-    this.updateReasonVisibility();
-  }
-  /** Ask "what changed?" only when this entry moves a known food to a new status. */
-  updateReasonVisibility() {
-    if (!this.reasonSection) return;
+  /** Show the known food's category (informational — logging never changes
+   * it) with a tap-through to the dedicated change flow. */
+  updateCategoryLine() {
+    this.categoryLine.empty();
     const known = findFood(this.foods, this.foodName);
-    if (known && known.currentStatus !== this.status) this.reasonSection.show();
-    else this.reasonSection.hide();
-  }
-  async save() {
-    const food = this.foodName.trim();
-    if (!food) {
-      new import_obsidian5.Notice("Add a food name first.");
-      return;
-    }
-    const { date, time } = nowStamp();
-    const strategies = [...this.strategies];
-    const known = findFood(this.foods, food);
-    const isShift = !!known && known.currentStatus !== this.status;
-    const note = buildEntryNote({
-      date,
-      time,
-      food,
-      meal: this.meal,
-      status: this.status,
-      outcome: this.outcome,
-      exposure: false,
-      exposureStep: "",
-      statusReason: isShift ? this.statusReason.trim() : "",
-      textureNotes: this.textureNotes.trim(),
-      context: [...this.contexts],
-      strategies,
-      strategyWorked: strategies.length > 0 ? this.strategyWorked : "n/a",
-      tags: splitList(this.tagsText)
+    if (!known) return;
+    this.categoryLine.createSpan({
+      text: `Category: ${STATUS_LABELS[known.currentStatus].toLowerCase()} \xB7 `
     });
-    await this.plugin.saveSettings();
-    const mealPrefix = this.meal ? `${this.meal}: ` : "";
-    await saveEntryNote(this.plugin, date, time, food, note, {
-      dailyLabel: `${mealPrefix}${food} \u2014 ${STATUS_LABELS[this.status].toLowerCase()}${this.outcome ? ", " + this.outcome : ""}`,
-      notice: `Logged ${food}`
+    const change = this.categoryLine.createEl("a", { text: "change" });
+    change.addEventListener("click", () => {
+      this.close();
+      new StatusChangeModal(this.app, this.plugin, known.name).open();
     });
-    this.close();
-  }
-};
-
-// src/exposure.ts
-var import_obsidian6 = require("obsidian");
-var statusRank = { fear: 0, trying: 1, safe: 2, "recently-expanded": 2 };
-var ExposureModal = class extends ArfidModal {
-  constructor(app, plugin, prefillFood) {
-    super(app, plugin, "Log an exposure");
-    this.foods = [];
-    this.foodName = "";
-    this.status = "fear";
-    this.statusTouched = false;
-    this.step = "";
-    this.contexts = /* @__PURE__ */ new Set();
-    this.strategies = /* @__PURE__ */ new Set();
-    this.strategyWorked = "n/a";
-    this.thoughts = "";
-    this.statusSetter = null;
-    if (prefillFood) this.foodName = prefillFood;
-  }
-  buildContent() {
-    this.foods = this.plugin.store.getFoods();
-    const { contentEl } = this;
-    buildChecklist(contentEl, "During the exposure", this.plugin.settings.exposureChecklist);
-    contentEl.createDiv({ cls: "arfid-field-label", text: "Food" });
-    const { input: foodInput } = buildFoodPicker(contentEl, this.foods, {
-      placeholder: "Which food?",
-      initial: this.foodName,
-      // fear foods first — they're what exposures are usually about
-      sort: (a, b) => statusRank[a.currentStatus] - statusRank[b.currentStatus] || b.lastLogged.localeCompare(a.lastLogged),
-      onChange: (name) => {
-        var _a;
-        this.foodName = name;
-        const known2 = findFood(this.foods, name);
-        if (known2 && !this.statusTouched) {
-          this.status = known2.currentStatus;
-          (_a = this.statusSetter) == null ? void 0 : _a.set(known2.currentStatus);
-        }
-      }
-    });
-    contentEl.createDiv({ cls: "arfid-field-label", text: "How far did it go? (any step counts)" });
-    buildChoiceRow(
-      contentEl,
-      EXPOSURE_STEPS.map((s) => ({ value: s, label: EXPOSURE_STEP_LABELS[s] })),
-      "",
-      (v) => this.step = v,
-      true
-    );
-    contentEl.createDiv({ cls: "arfid-field-label", text: "Status" });
-    this.statusSetter = buildStatusRow(contentEl, this.status, (v) => {
-      if (v !== "") {
-        this.status = v;
-        this.statusTouched = true;
-      }
-    });
-    const known = findFood(this.foods, this.foodName);
-    if (known && !this.statusTouched) {
-      this.status = known.currentStatus;
-      this.statusSetter.set(known.currentStatus);
-    }
-    buildChipPicker(contentEl, "Environment & context", this.plugin.settings.knownContexts, this.contexts);
-    buildStrategySection(contentEl, this.plugin.settings.knownStrategies, this.strategies, (w) => this.strategyWorked = w);
-    contentEl.createDiv({ cls: "arfid-field-label", text: "How did it go? (saved into the note)" });
-    const thoughts = contentEl.createEl("textarea", {
-      cls: "arfid-textarea",
-      attr: { rows: "3", placeholder: "What happened, what it felt like, what the next step could be\u2026" }
-    });
-    thoughts.addEventListener("input", () => this.thoughts = thoughts.value);
-    this.addSaveButton("Save exposure", () => this.save());
-    if (!this.foodName) window.setTimeout(() => foodInput.focus(), 50);
   }
   async save() {
     const food = this.foodName.trim();
@@ -1148,8 +1139,109 @@ var ExposureModal = class extends ArfidModal {
       date,
       time,
       food,
+      meal: this.meal,
+      status: "",
+      // ordinary logs never assert a category
+      outcome: this.outcome,
+      exposure: false,
+      exposureStep: "",
+      statusReason: "",
+      textureNotes: this.textureNotes.trim(),
+      context: [...this.contexts],
+      strategies,
+      strategyWorked: strategies.length > 0 ? this.strategyWorked : "n/a",
+      tags: splitList(this.tagsText)
+    });
+    await this.plugin.saveSettings();
+    const mealPrefix = this.meal ? `${this.meal}: ` : "";
+    await saveEntryNote(this.plugin, date, time, food, note, {
+      dailyLabel: `${mealPrefix}${food}${this.outcome ? " \u2014 " + this.outcome : ""}`,
+      notice: `Logged ${food}`
+    });
+    this.close();
+  }
+};
+
+// src/exposure.ts
+var import_obsidian7 = require("obsidian");
+var ExposureModal = class extends ArfidModal {
+  constructor(app, plugin, prefillFood) {
+    super(app, plugin, "Log an exposure");
+    this.foods = [];
+    this.foodName = "";
+    this.step = "";
+    this.contexts = /* @__PURE__ */ new Set();
+    this.strategies = /* @__PURE__ */ new Set();
+    this.strategyWorked = "n/a";
+    this.thoughts = "";
+    if (prefillFood) this.foodName = prefillFood;
+  }
+  buildContent() {
+    this.foods = this.plugin.store.getFoods();
+    const { contentEl } = this;
+    buildChecklist(contentEl, "During the exposure", this.plugin.settings.exposureChecklist);
+    contentEl.createDiv({ cls: "arfid-field-label", text: "Food" });
+    const { input: foodInput } = buildFoodPicker(contentEl, this.foods, {
+      placeholder: "Which food?",
+      initial: this.foodName,
+      // least-accepted foods first — they're what exposures are about
+      sort: (a, b) => acceptanceRank(a.currentStatus) - acceptanceRank(b.currentStatus) || b.lastLogged.localeCompare(a.lastLogged),
+      onChange: (name) => {
+        this.foodName = name;
+        this.updateCategoryLine();
+      }
+    });
+    this.categoryLine = contentEl.createDiv({ cls: "arfid-hint arfid-category-line" });
+    this.updateCategoryLine();
+    contentEl.createDiv({ cls: "arfid-field-label", text: "How far did it go? (any step counts)" });
+    buildChoiceRow(
+      contentEl,
+      EXPOSURE_STEPS.map((s) => ({ value: s, label: EXPOSURE_STEP_LABELS[s] })),
+      "",
+      (v) => this.step = v,
+      true
+    );
+    buildChipPicker(contentEl, "Environment & context", this.plugin.settings.knownContexts, this.contexts);
+    buildStrategySection(contentEl, this.plugin.settings.knownStrategies, this.strategies, (w) => this.strategyWorked = w);
+    contentEl.createDiv({ cls: "arfid-field-label", text: "How did it go? (saved into the note)" });
+    const thoughts = contentEl.createEl("textarea", {
+      cls: "arfid-textarea",
+      attr: { rows: "3", placeholder: "What happened, what it felt like, what the next step could be\u2026" }
+    });
+    thoughts.addEventListener("input", () => this.thoughts = thoughts.value);
+    this.addSaveButton("Save exposure", () => this.save());
+    if (!this.foodName) window.setTimeout(() => foodInput.focus(), 50);
+  }
+  /** Show the known food's category (informational — an exposure never
+   * changes it) with a tap-through to the dedicated change flow. */
+  updateCategoryLine() {
+    this.categoryLine.empty();
+    const known = findFood(this.foods, this.foodName);
+    if (!known) return;
+    this.categoryLine.createSpan({
+      text: `Category: ${STATUS_LABELS[known.currentStatus].toLowerCase()} \xB7 `
+    });
+    const change = this.categoryLine.createEl("a", { text: "change" });
+    change.addEventListener("click", () => {
+      this.close();
+      new StatusChangeModal(this.app, this.plugin, known.name).open();
+    });
+  }
+  async save() {
+    const food = this.foodName.trim();
+    if (!food) {
+      new import_obsidian7.Notice("Add a food name first.");
+      return;
+    }
+    const { date, time } = nowStamp();
+    const strategies = [...this.strategies];
+    const note = buildEntryNote({
+      date,
+      time,
+      food,
       meal: "",
-      status: this.status,
+      status: "",
+      // exposures never assert a category
       outcome: outcomeForStep(this.step),
       exposure: true,
       exposureStep: this.step,
@@ -1180,7 +1272,9 @@ var StrugglingModal = class extends ArfidModal {
   }
   buildContent() {
     const foods = this.plugin.store.getFoods();
-    this.safeFoods = foods.filter((f) => f.currentStatus === "safe" || f.currentStatus === "recently-expanded");
+    this.safeFoods = foods.filter(
+      (f) => f.currentStatus === "safe" || f.currentStatus === "like" || f.currentStatus === "recently-expanded"
+    );
     this.notesByFood = this.plugin.store.getFoodNotesByKey();
     const { contentEl } = this;
     const reminders = this.plugin.settings.kindnessReminders;
@@ -1230,7 +1324,7 @@ var StrugglingModal = class extends ArfidModal {
       text.createSpan({ cls: "arfid-option-meta", text: `last had ${f.lastLogged}` });
       btn.addEventListener("click", () => {
         this.close();
-        new QuickLogModal(this.app, this.plugin, { food: f.name, status: f.currentStatus }).open();
+        new QuickLogModal(this.app, this.plugin, { food: f.name }).open();
       });
       const notes = (_a = this.notesByFood.get(f.key)) != null ? _a : [];
       if (notes.length > 0) {
@@ -1248,7 +1342,7 @@ var StrugglingModal = class extends ArfidModal {
 };
 
 // src/symptoms.ts
-var import_obsidian7 = require("obsidian");
+var import_obsidian8 = require("obsidian");
 var SymptomModal = class extends ArfidModal {
   constructor(app, plugin) {
     super(app, plugin, "Log symptoms");
@@ -1272,7 +1366,7 @@ var SymptomModal = class extends ArfidModal {
   }
   async save() {
     if (this.symptoms.size === 0) {
-      new import_obsidian7.Notice("Pick at least one symptom.");
+      new import_obsidian8.Notice("Pick at least one symptom.");
       return;
     }
     const { date, time } = nowStamp();
@@ -1287,7 +1381,7 @@ var SymptomModal = class extends ArfidModal {
 };
 
 // src/foodnote.ts
-var import_obsidian8 = require("obsidian");
+var import_obsidian9 = require("obsidian");
 var FoodNoteModal = class extends ArfidModal {
   constructor(app, plugin, prefillFood, prefillKind) {
     super(app, plugin, "Add a ritual, order, or recipe");
@@ -1330,104 +1424,19 @@ var FoodNoteModal = class extends ArfidModal {
   async save() {
     const food = this.foodName.trim();
     if (!food) {
-      new import_obsidian8.Notice("Add a food name first.");
+      new import_obsidian9.Notice("Add a food name first.");
       return;
     }
     if (!this.body.trim()) {
-      new import_obsidian8.Notice("Write the details first \u2014 that's the part future you needs.");
+      new import_obsidian9.Notice("Write the details first \u2014 that's the part future you needs.");
       return;
     }
     const { date } = nowStamp();
     const base = sanitizeForFilename(`${food} \u2014 ${NOTE_KIND_LABELS[this.kind].toLowerCase()}`);
     await createUniqueNote(this.app, this.plugin.settings.entriesFolder, base, buildFoodNote(date, food, this.kind, this.body));
-    new import_obsidian8.Notice(`Saved ${NOTE_KIND_LABELS[this.kind].toLowerCase()} for ${food}.`);
+    new import_obsidian9.Notice(`Saved ${NOTE_KIND_LABELS[this.kind].toLowerCase()} for ${food}.`);
     this.close();
     this.plugin.notifyDataChanged();
-  }
-};
-
-// src/statuschange.ts
-var import_obsidian9 = require("obsidian");
-var StatusChangeModal = class extends ArfidModal {
-  constructor(app, plugin, prefillFood) {
-    super(app, plugin, "Change a food's status");
-    this.foods = [];
-    this.foodName = "";
-    this.status = "";
-    this.reason = "";
-    if (prefillFood) this.foodName = prefillFood;
-  }
-  buildContent() {
-    this.foods = this.plugin.store.getFoods();
-    const { contentEl } = this;
-    contentEl.createDiv({ cls: "arfid-field-label", text: "Food" });
-    buildFoodPicker(contentEl, this.foods, {
-      placeholder: "Which food?",
-      initial: this.foodName,
-      onChange: (name) => {
-        this.foodName = name;
-        this.updateCurrent();
-      }
-    });
-    this.currentLine = contentEl.createDiv({ cls: "arfid-hint" });
-    this.updateCurrent();
-    contentEl.createDiv({ cls: "arfid-field-label", text: "New status" });
-    buildStatusRow(contentEl, "", (v) => this.status = v);
-    contentEl.createDiv({ cls: "arfid-field-label", text: "What changed?" });
-    const reason = contentEl.createEl("textarea", {
-      cls: "arfid-textarea",
-      attr: {
-        rows: "3",
-        placeholder: "The specific thought or moment behind this \u2014 why was it gained or lost?"
-      }
-    });
-    reason.addEventListener("input", () => this.reason = reason.value);
-    this.addSaveButton("Save status change", () => this.save());
-  }
-  updateCurrent() {
-    const known = findFood(this.foods, this.foodName);
-    this.currentLine.setText(
-      known ? `Currently: ${STATUS_LABELS[known.currentStatus]} (since ${known.lastLogged})` : ""
-    );
-  }
-  async save() {
-    const food = this.foodName.trim();
-    if (!food) {
-      new import_obsidian9.Notice("Add a food name first.");
-      return;
-    }
-    if (!this.status) {
-      new import_obsidian9.Notice("Pick the new status.");
-      return;
-    }
-    const known = findFood(this.foods, food);
-    if (known && known.currentStatus === this.status) {
-      new import_obsidian9.Notice(`${food} is already marked ${STATUS_LABELS[this.status].toLowerCase()}.`);
-      return;
-    }
-    const { date, time } = nowStamp();
-    const note = buildEntryNote({
-      date,
-      time,
-      food,
-      meal: "",
-      status: this.status,
-      outcome: "",
-      exposure: false,
-      exposureStep: "",
-      statusReason: this.reason.trim(),
-      textureNotes: "",
-      context: [],
-      strategies: [],
-      strategyWorked: "n/a",
-      tags: ["status-change"]
-    });
-    const fromLabel = known ? `${STATUS_LABELS[known.currentStatus].toLowerCase()} \u2192 ` : "";
-    await saveEntryNote(this.plugin, date, time, food, note, {
-      dailyLabel: `status: ${food} \u2014 ${fromLabel}${STATUS_LABELS[this.status].toLowerCase()}`,
-      notice: `${food} \u2192 ${STATUS_LABELS[this.status].toLowerCase()}`
-    });
-    this.close();
   }
 };
 
@@ -1463,7 +1472,7 @@ var AddFoodModal = class extends ArfidModal {
     const { contentEl } = this;
     contentEl.createDiv({
       cls: "arfid-hint",
-      text: "Nothing is logged as eaten \u2014 this just adds the food with a status."
+      text: "Nothing is logged as eaten \u2014 this just adds the food with a category."
     });
     const { input: foodInput } = buildFoodPicker(contentEl, foods, {
       placeholder: "Food name",
@@ -1482,7 +1491,7 @@ var AddFoodModal = class extends ArfidModal {
       }
     });
     this.hintEl = contentEl.createDiv({ cls: "arfid-hint" });
-    contentEl.createDiv({ cls: "arfid-field-label", text: "Status" });
+    contentEl.createDiv({ cls: "arfid-field-label", text: "Category" });
     buildStatusRow(contentEl, "", (v) => this.status = v);
     this.saveBtn = this.addSaveButton("Add food", () => this.save());
     const bulkLink = contentEl.createEl("button", {
@@ -1508,7 +1517,7 @@ var AddFoodModal = class extends ArfidModal {
       return;
     }
     if (!this.status) {
-      new import_obsidian10.Notice("Pick a status for it.");
+      new import_obsidian10.Notice("Pick a category for it.");
       return;
     }
     const { date, time } = nowStamp();
@@ -1576,10 +1585,16 @@ function placeholderFor(status) {
   switch (status) {
     case "safe":
       return "chicken nuggets, white rice, pretzels";
-    case "trying":
-      return "cheese curds";
+    case "like":
+      return "cheese pizza";
+    case "neutral":
+      return "water, plain crackers";
+    case "dislike":
+      return "overcooked pasta";
     case "fear":
       return "mixed casseroles, mushy vegetables";
+    case "trying":
+      return "cheese curds";
     case "recently-expanded":
       return "scrambled eggs";
   }
@@ -1898,7 +1913,7 @@ function buildMarkdownSummary(store) {
     for (const e of entries) {
       const kind = e.kind === "exposure" ? `exposure${e.exposureStep ? ` (${EXPOSURE_STEP_LABELS[e.exposureStep].toLowerCase()})` : ""}` : e.kind === "status-change" ? "status change" : e.kind === "baseline" ? "baseline" : e.meal || "\u2014";
       lines.push(
-        `| ${e.date} | ${e.time} | ${e.food} | ${kind} | ${STATUS_LABELS[e.status]} | ${e.outcome || "\u2014"} | ${e.strategies.join(", ") || "\u2014"} | ${e.context.join(", ") || "\u2014"} |`
+        `| ${e.date} | ${e.time} | ${e.food} | ${kind} | ${e.status ? STATUS_LABELS[e.status] : "\u2014"} | ${e.outcome || "\u2014"} | ${e.strategies.join(", ") || "\u2014"} | ${e.context.join(", ") || "\u2014"} |`
       );
     }
   }
@@ -2185,8 +2200,8 @@ var ArfidDashboardView = class extends import_obsidian12.ItemView {
     const row = parent.createDiv({ cls: "arfid-entry-row" });
     row.createSpan({ cls: "arfid-entry-when", text: `${e.date} ${e.time}`.trim() });
     const main = row.createSpan({ cls: "arfid-entry-main" });
-    main.createSpan({ cls: `arfid-status-dot arfid-status-${e.status}` });
-    main.createSpan({ text: showFood ? e.food : STATUS_LABELS[e.status] });
+    main.createSpan({ cls: `arfid-status-dot ${statusDotClass(e.status)}` });
+    main.createSpan({ text: showFood ? e.food : e.status ? STATUS_LABELS[e.status] : "logged" });
     if (e.kind === "exposure") {
       const step = e.exposureStep ? EXPOSURE_STEP_LABELS[e.exposureStep].toLowerCase() : "";
       row.createSpan({ cls: "arfid-entry-outcome", text: step ? `exposure \xB7 ${step}` : "exposure" });

@@ -1,5 +1,6 @@
 import { App, TFile } from "obsidian";
 import {
+	DEFAULT_STATUS,
 	EXPOSURE_STEPS,
 	ExposureStep,
 	FOOD_STATUSES,
@@ -122,25 +123,30 @@ export class EntryStore {
 					name: e.food.trim(),
 					key,
 					entries: [],
-					currentStatus: e.status,
+					currentStatus: DEFAULT_STATUS,
 					firstLogged: e.date,
 					lastLogged: e.date,
 				};
 				byKey.set(key, f);
 			}
 			f.entries.push(e);
-			f.currentStatus = e.status; // entries arrive chronologically
+			// only explicit category assertions move a food's category;
+			// ordinary logs (status "") leave it untouched
+			if (e.status) f.currentStatus = e.status; // entries arrive chronologically
 			f.lastLogged = e.date;
 		}
 		return [...byKey.values()].sort((a, b) => a.name.localeCompare(b.name));
 	}
 
-	/** Status changes per food, in chronological order across all foods. */
+	/** Category changes per food, in chronological order across all foods.
+	 * Only explicit category assertions participate — ordinary logs can't
+	 * create a shift. */
 	getStatusShifts(foods?: FoodSummary[]): StatusShift[] {
 		const shifts: StatusShift[] = [];
 		for (const food of foods ?? this.getFoods()) {
 			let prev: FoodStatus | null = null;
 			for (const e of food.entries) {
+				if (!e.status) continue;
 				if (prev !== null && e.status !== prev) {
 					shifts.push({ food: food.name, from: prev, to: e.status, date: e.date, reason: e.statusReason });
 				}
@@ -248,12 +254,12 @@ function normalizeTime(value: unknown): string {
 	return `${m[1].padStart(2, "0")}:${m[2]}`;
 }
 
-function normalizeStatus(value: unknown): FoodStatus {
+function normalizeStatus(value: unknown): FoodStatus | "" {
 	const s = String(value ?? "").trim().toLowerCase();
 	if ((FOOD_STATUSES as readonly string[]).includes(s)) return s as FoodStatus;
 	// tolerate close variants in hand-edited notes
 	if (s === "expanded" || s === "recently expanded") return "recently-expanded";
-	return "trying";
+	return "";
 }
 
 function normalizeMeal(value: unknown): MealType {

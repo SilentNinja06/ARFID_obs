@@ -236,7 +236,7 @@ export function buildMarkdownSummary(store: EntryStore): string {
 							? "baseline"
 							: e.meal || "—";
 			lines.push(
-				`| ${e.date} | ${e.time} | ${e.food} | ${kind} | ${STATUS_LABELS[e.status]} | ${e.outcome || "—"} | ${e.strategies.join(", ") || "—"} | ${e.context.join(", ") || "—"} |`
+				`| ${e.date} | ${e.time} | ${e.food} | ${kind} | ${e.status ? STATUS_LABELS[e.status] : "—"} | ${e.outcome || "—"} | ${e.strategies.join(", ") || "—"} | ${e.context.join(", ") || "—"} |`
 			);
 		}
 	}

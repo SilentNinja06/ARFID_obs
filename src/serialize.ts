@@ -49,7 +49,7 @@ export function buildEntryNote(f: EntryFields): string {
 		`time: "${f.time}"`,
 		`food: ${yamlString(f.food)}`,
 		`meal: ${f.meal ? f.meal : '""'}`,
-		`status: ${f.status}`,
+		`status: ${f.status ? f.status : '""'}`,
 		`outcome: ${f.outcome ? f.outcome : '""'}`,
 		`exposure: ${f.exposure ? "true" : "false"}`,
 		`exposure_step: ${f.exposureStep ? f.exposureStep : '""'}`,

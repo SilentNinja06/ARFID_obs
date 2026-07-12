@@ -7,6 +7,9 @@
 .arfid-plugin {
 	--arfid-accent: #2a78d6;
 	--arfid-safe: #2a78d6;
+	--arfid-like: #4a8ce4;
+	--arfid-neutral: #6b7280;
+	--arfid-dislike: #7d6650;
 	--arfid-trying: #178f7f;
 	--arfid-fear: #a1751c;
 	--arfid-expanded: #8a7ac2;
@@ -16,6 +19,9 @@
 .theme-dark .arfid-plugin {
 	--arfid-accent: #3987e5;
 	--arfid-safe: #3987e5;
+	--arfid-like: #6da7ec;
+	--arfid-neutral: #8b95a5;
+	--arfid-dislike: #a58a66;
 	--arfid-trying: #27a08f;
 	--arfid-fear: #b08a3e;
 	--arfid-expanded: #8d7dd6;
@@ -189,9 +195,20 @@
 }
 
 .arfid-status-safe { background: var(--arfid-safe); }
+.arfid-status-like { background: var(--arfid-like); }
+.arfid-status-neutral { background: var(--arfid-neutral); }
+.arfid-status-dislike { background: var(--arfid-dislike); }
 .arfid-status-trying { background: var(--arfid-trying); }
 .arfid-status-fear { background: var(--arfid-fear); }
 .arfid-status-recently-expanded { background: var(--arfid-expanded); }
+
+.arfid-category-line {
+	margin: 0.35em 0 0;
+}
+
+.arfid-category-line a {
+	cursor: pointer;
+}
 
 /* ------------------------------------------------------------- quick log */
 

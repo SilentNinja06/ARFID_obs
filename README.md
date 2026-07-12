@@ -13,12 +13,19 @@ daily-note linking, inline SVG charts, and the same release setup.
 
 - **Quick-log modal** — reachable from the ribbon, command palette, or a mobile
   toolbar button. Food name with autocomplete from previously logged foods
-  (recent foods are offered before you type anything), one-tap status and
+  (recent foods are offered before you type anything), one-tap meal and
   outcome chips, and everything else behind an "Add details" disclosure:
   strategies, context, texture notes, tags. All tap targets are ≥44px.
-- **Food library** — every food ever logged, grouped by current status
-  (safe / trying / fear / recently expanded), searchable, tap a food to see its
-  full history inline.
+  **Logging never asks for or changes a food's category** — log water ten
+  times a day without ever answering the safe/fear question.
+- **Categories are a property of the food, not the log.** The spectrum is
+  safe / like / neutral / dislike / fear, plus the process states trying and
+  recently expanded. Foods never categorized default to neutral. Category
+  changes happen only through the dedicated change flow (food library,
+  command, or the "change" link shown while logging a known food), which
+  always asks "what changed?" so the reason is documented.
+- **Food library** — every food ever logged, grouped by current category,
+  searchable, tap a food to see its full history inline.
 - **Add foods without logging a meal** — "+ Add food" in the library (or the
   command palette) adds a single food with a status any time one comes to
   mind, and links to a bulk mode that takes whole safe/trying/fear/expanded
@@ -82,7 +89,8 @@ date: 2026-07-11
 time: "18:30"
 food: "scrambled eggs"
 meal: dinner              # breakfast | lunch | dinner | snack | drink | ""
-status: trying            # safe | trying | fear | recently-expanded
+status: ""                # "" on ordinary logs; safe | like | neutral | dislike |
+                          # fear | trying | recently-expanded on category events
 outcome: partial          # full | partial | refused | avoided | ""
 exposure: false           # true when logged through the exposure flow
 exposure_step: ""         # looked | smelled | touched | tasted | bite | portion

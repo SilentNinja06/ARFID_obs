@@ -3,20 +3,20 @@ import {
 	EXPOSURE_STEP_LABELS,
 	EXPOSURE_STEPS,
 	ExposureStep,
-	FoodStatus,
 	FoodSummary,
+	STATUS_LABELS,
 	StrategyWorked,
+	acceptanceRank,
 	findFood,
 	outcomeForStep,
 } from "./types";
 import { nowStamp } from "./store";
 import { buildEntryNote } from "./serialize";
 import { saveEntryNote } from "./files";
-import { buildChecklist, buildChipPicker, buildChoiceRow, buildFoodPicker, buildStatusRow, buildStrategySection } from "./chips";
+import { buildChecklist, buildChipPicker, buildChoiceRow, buildFoodPicker, buildStrategySection } from "./chips";
 import { ArfidModal } from "./modal";
+import { StatusChangeModal } from "./statuschange";
 import type ArfidTrackerPlugin from "./main";
-
-const statusRank: Record<FoodStatus, number> = { fear: 0, trying: 1, safe: 2, "recently-expanded": 2 };
 
 /** Exposure logging: pick a fear/trying food, see the exposure checklist,
  * record how far up the ladder this exposure went, the environment, and the
@@ -24,15 +24,13 @@ const statusRank: Record<FoodStatus, number> = { fear: 0, trying: 1, safe: 2, "r
 export class ExposureModal extends ArfidModal {
 	private foods: FoodSummary[] = [];
 	private foodName = "";
-	private status: FoodStatus = "fear";
-	private statusTouched = false;
 	private step: ExposureStep = "";
 	private contexts = new Set<string>();
 	private strategies = new Set<string>();
 	private strategyWorked: StrategyWorked = "n/a";
 	private thoughts = "";
 
-	private statusSetter: { set: (v: FoodStatus | "") => void } | null = null;
+	private categoryLine!: HTMLElement;
 
 	constructor(app: App, plugin: ArfidTrackerPlugin, prefillFood?: string) {
 		super(app, plugin, "Log an exposure");
@@ -49,19 +47,17 @@ export class ExposureModal extends ArfidModal {
 		const { input: foodInput } = buildFoodPicker(contentEl, this.foods, {
 			placeholder: "Which food?",
 			initial: this.foodName,
-			// fear foods first — they're what exposures are usually about
+			// least-accepted foods first — they're what exposures are about
 			sort: (a, b) =>
-				statusRank[a.currentStatus] - statusRank[b.currentStatus] ||
+				acceptanceRank(a.currentStatus) - acceptanceRank(b.currentStatus) ||
 				b.lastLogged.localeCompare(a.lastLogged),
 			onChange: (name) => {
 				this.foodName = name;
-				const known = findFood(this.foods, name);
-				if (known && !this.statusTouched) {
-					this.status = known.currentStatus;
-					this.statusSetter?.set(known.currentStatus);
-				}
+				this.updateCategoryLine();
 			},
 		});
+		this.categoryLine = contentEl.createDiv({ cls: "arfid-hint arfid-category-line" });
+		this.updateCategoryLine();
 
 		contentEl.createDiv({ cls: "arfid-field-label", text: "How far did it go? (any step counts)" });
 		buildChoiceRow<Exclude<ExposureStep, "">>(
@@ -71,19 +67,6 @@ export class ExposureModal extends ArfidModal {
 			(v) => (this.step = v),
 			true
 		);
-
-		contentEl.createDiv({ cls: "arfid-field-label", text: "Status" });
-		this.statusSetter = buildStatusRow(contentEl, this.status, (v) => {
-			if (v !== "") {
-				this.status = v;
-				this.statusTouched = true;
-			}
-		});
-		const known = findFood(this.foods, this.foodName);
-		if (known && !this.statusTouched) {
-			this.status = known.currentStatus;
-			this.statusSetter.set(known.currentStatus);
-		}
 
 		buildChipPicker(contentEl, "Environment & context", this.plugin.settings.knownContexts, this.contexts);
 		buildStrategySection(contentEl, this.plugin.settings.knownStrategies, this.strategies, (w) => (this.strategyWorked = w));
@@ -97,6 +80,22 @@ export class ExposureModal extends ArfidModal {
 
 		this.addSaveButton("Save exposure", () => this.save());
 		if (!this.foodName) window.setTimeout(() => foodInput.focus(), 50);
+	}
+
+	/** Show the known food's category (informational — an exposure never
+	 * changes it) with a tap-through to the dedicated change flow. */
+	private updateCategoryLine(): void {
+		this.categoryLine.empty();
+		const known = findFood(this.foods, this.foodName);
+		if (!known) return;
+		this.categoryLine.createSpan({
+			text: `Category: ${STATUS_LABELS[known.currentStatus].toLowerCase()} · `,
+		});
+		const change = this.categoryLine.createEl("a", { text: "change" });
+		change.addEventListener("click", () => {
+			this.close();
+			new StatusChangeModal(this.app, this.plugin, known.name).open();
+		});
 	}
 
 	private async save(): Promise<void> {
@@ -113,7 +112,7 @@ export class ExposureModal extends ArfidModal {
 			time,
 			food,
 			meal: "",
-			status: this.status,
+			status: "", // exposures never assert a category
 			outcome: outcomeForStep(this.step),
 			exposure: true,
 			exposureStep: this.step,
