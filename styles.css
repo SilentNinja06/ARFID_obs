@@ -1,0 +1,470 @@
+/* ARFID Tracker — calm, low-visual-noise, mobile-first.
+   Data colors are a validated categorical set (lightness band, chroma floor,
+   CVD separation, contrast ≥3:1 checked per mode); surfaces/text/chrome come
+   from Obsidian theme variables. Status color is never the only encoding —
+   every status mark sits next to its text label. */
+
+.arfid-plugin {
+	--arfid-accent: #2a78d6;
+	--arfid-safe: #2a78d6;
+	--arfid-trying: #178f7f;
+	--arfid-fear: #a1751c;
+	--arfid-expanded: #8a7ac2;
+	--arfid-bar-track: var(--background-modifier-border);
+}
+
+.theme-dark .arfid-plugin {
+	--arfid-accent: #3987e5;
+	--arfid-safe: #3987e5;
+	--arfid-trying: #27a08f;
+	--arfid-fear: #b08a3e;
+	--arfid-expanded: #8d7dd6;
+}
+
+/* ---------------------------------------------------------------- layout */
+
+.arfid-dashboard {
+	padding: 0.75em 0.9em 2em;
+	overflow-y: auto;
+}
+
+.arfid-header {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 0.5em;
+	flex-wrap: wrap;
+	margin-bottom: 0.75em;
+}
+
+.arfid-tabs {
+	display: flex;
+	gap: 0.25em;
+}
+
+.arfid-tab {
+	min-height: 44px;
+	padding: 0 0.9em;
+	border-radius: var(--radius-m, 8px);
+	background: transparent;
+	color: var(--text-muted);
+	box-shadow: none;
+	cursor: pointer;
+}
+
+.arfid-tab.is-active {
+	background: var(--background-secondary);
+	color: var(--text-normal);
+	font-weight: 600;
+}
+
+.arfid-log-btn,
+.arfid-save-btn {
+	min-height: 44px;
+	padding: 0 1.1em;
+	border-radius: var(--radius-m, 8px);
+	background: var(--arfid-accent);
+	color: #fff;
+	font-weight: 600;
+	cursor: pointer;
+	border: none;
+}
+
+.arfid-save-btn {
+	width: 100%;
+	margin-top: 1em;
+	font-size: 1.05em;
+}
+
+.arfid-section {
+	margin: 1.1em 0;
+}
+
+.arfid-section h3 {
+	margin: 0 0 0.4em;
+	font-size: 0.95em;
+	color: var(--text-normal);
+}
+
+.arfid-section-head {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 0.5em;
+	flex-wrap: wrap;
+}
+
+.arfid-hint {
+	color: var(--text-muted);
+	font-size: 0.85em;
+	margin-bottom: 0.5em;
+}
+
+.arfid-empty {
+	color: var(--text-muted);
+	font-size: 0.9em;
+	padding: 0.6em 0;
+}
+
+/* ---------------------------------------------------------------- cards */
+
+.arfid-cards {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+	gap: 0.6em;
+}
+
+.arfid-card {
+	background: var(--background-secondary);
+	border-radius: var(--radius-m, 8px);
+	padding: 0.8em 0.9em;
+}
+
+.arfid-card-value {
+	font-size: 1.7em;
+	font-weight: 700;
+	line-height: 1.2;
+	font-variant-numeric: tabular-nums;
+}
+
+.arfid-card-label {
+	color: var(--text-muted);
+	font-size: 0.82em;
+	margin-top: 0.15em;
+}
+
+.arfid-text-safe { color: var(--arfid-safe); }
+.arfid-text-trying { color: var(--arfid-trying); }
+.arfid-text-fear { color: var(--arfid-fear); }
+.arfid-text-expanded { color: var(--arfid-expanded); }
+
+/* ---------------------------------------------------------------- chips */
+
+.arfid-chip-row {
+	display: flex;
+	gap: 0.4em;
+	flex-wrap: wrap;
+	margin-bottom: 0.4em;
+}
+
+.arfid-chip {
+	min-height: 44px;
+	padding: 0 0.85em;
+	border-radius: 22px;
+	border: 1px solid var(--background-modifier-border);
+	background: var(--background-secondary);
+	color: var(--text-normal);
+	display: inline-flex;
+	align-items: center;
+	gap: 0.4em;
+	cursor: pointer;
+	box-shadow: none;
+	font-size: 0.92em;
+}
+
+.arfid-chip.is-selected {
+	border-color: var(--arfid-accent);
+	background: var(--arfid-accent);
+	color: #fff;
+}
+
+.arfid-chip.is-selected .arfid-status-dot {
+	outline: 2px solid #fff;
+}
+
+.arfid-field-label {
+	font-size: 0.82em;
+	color: var(--text-muted);
+	margin: 0.9em 0 0.35em;
+	text-transform: uppercase;
+	letter-spacing: 0.03em;
+}
+
+.arfid-status-dot {
+	display: inline-block;
+	width: 10px;
+	height: 10px;
+	border-radius: 50%;
+	flex-shrink: 0;
+	vertical-align: baseline;
+}
+
+.arfid-status-safe { background: var(--arfid-safe); }
+.arfid-status-trying { background: var(--arfid-trying); }
+.arfid-status-fear { background: var(--arfid-fear); }
+.arfid-status-recently-expanded { background: var(--arfid-expanded); }
+
+/* ------------------------------------------------------------- quick log */
+
+.arfid-input,
+.arfid-textarea {
+	width: 100%;
+	min-height: 44px;
+	font-size: 1em;
+	padding: 0.5em 0.7em;
+	border-radius: var(--radius-m, 8px);
+	border: 1px solid var(--background-modifier-border);
+	background: var(--background-primary);
+	color: var(--text-normal);
+}
+
+.arfid-textarea {
+	resize: vertical;
+}
+
+.arfid-suggestions {
+	display: flex;
+	gap: 0.4em;
+	flex-wrap: wrap;
+	margin-top: 0.45em;
+	min-height: 0;
+}
+
+.arfid-details-toggle {
+	margin-top: 1em;
+	min-height: 44px;
+	width: 100%;
+	background: transparent;
+	border: 1px dashed var(--background-modifier-border);
+	border-radius: var(--radius-m, 8px);
+	color: var(--text-muted);
+	cursor: pointer;
+	box-shadow: none;
+}
+
+.arfid-add-row {
+	display: flex;
+	gap: 0.4em;
+	align-items: stretch;
+}
+
+.arfid-add-row .arfid-input {
+	flex: 1;
+}
+
+/* ---------------------------------------------------------------- charts */
+
+.arfid-chart-wrap {
+	position: relative;
+	background: var(--background-secondary);
+	border-radius: var(--radius-m, 8px);
+	padding: 0.6em 0.6em 0.3em;
+}
+
+.arfid-linechart {
+	width: 100%;
+	height: auto;
+	display: block;
+	touch-action: pan-y;
+}
+
+.arfid-grid {
+	stroke: var(--background-modifier-border);
+	stroke-width: 1;
+}
+
+.arfid-axis-label {
+	fill: var(--text-muted);
+	font-size: 11px;
+}
+
+.arfid-line {
+	fill: none;
+	stroke: var(--arfid-accent);
+	stroke-width: 2;
+	stroke-linejoin: round;
+	stroke-linecap: round;
+}
+
+.arfid-dot {
+	fill: var(--arfid-accent);
+	stroke: var(--background-secondary);
+	stroke-width: 2;
+}
+
+.arfid-tooltip {
+	position: absolute;
+	top: 4px;
+	transform: translateX(-50%);
+	background: var(--background-primary);
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 6px;
+	padding: 2px 8px;
+	font-size: 0.8em;
+	color: var(--text-normal);
+	pointer-events: none;
+	white-space: nowrap;
+}
+
+/* ----------------------------------------------------------------- bars */
+
+.arfid-bar-row {
+	margin-bottom: 0.7em;
+}
+
+.arfid-bar-labels {
+	display: flex;
+	justify-content: space-between;
+	gap: 0.6em;
+	font-size: 0.88em;
+	margin-bottom: 0.2em;
+}
+
+.arfid-bar-name {
+	color: var(--text-normal);
+}
+
+.arfid-bar-value {
+	color: var(--text-muted);
+	font-variant-numeric: tabular-nums;
+	text-align: right;
+}
+
+.arfid-bar-track {
+	height: 10px;
+	border-radius: 4px;
+	background: var(--arfid-bar-track);
+	overflow: hidden;
+}
+
+.arfid-bar-fill {
+	height: 100%;
+	border-radius: 0 4px 4px 0;
+	background: var(--arfid-accent);
+	opacity: 1;
+	position: relative;
+}
+
+@supports (background: color-mix(in srgb, red 50%, blue)) {
+	.arfid-bar-fill {
+		background: color-mix(in srgb, var(--arfid-accent) 35%, var(--background-secondary));
+	}
+}
+
+.arfid-bar-fraction {
+	position: absolute;
+	inset: 0 auto 0 0;
+	border-radius: 0 4px 4px 0;
+	background: var(--arfid-accent);
+}
+
+/* ----------------------------------------------------------------- lists */
+
+.arfid-entry-row,
+.arfid-food-row .arfid-food-main,
+.arfid-shift-row {
+	display: flex;
+	align-items: center;
+	gap: 0.6em;
+	min-height: 44px;
+	padding: 0.15em 0.3em;
+	border-radius: var(--radius-s, 6px);
+	cursor: pointer;
+}
+
+.arfid-entry-row:hover,
+.arfid-food-row .arfid-food-main:hover {
+	background: var(--background-secondary);
+}
+
+.arfid-entry-when,
+.arfid-shift-date {
+	color: var(--text-muted);
+	font-size: 0.82em;
+	font-variant-numeric: tabular-nums;
+	flex-shrink: 0;
+	min-width: 7.5em;
+}
+
+.arfid-entry-main {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.45em;
+	flex: 1;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.arfid-entry-outcome {
+	color: var(--text-muted);
+	font-size: 0.85em;
+	flex-shrink: 0;
+}
+
+.arfid-shift-row {
+	cursor: default;
+}
+
+.arfid-shift-food {
+	font-weight: 600;
+	flex-shrink: 0;
+}
+
+.arfid-shift-change {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.35em;
+	color: var(--text-muted);
+	font-size: 0.9em;
+	flex-wrap: wrap;
+}
+
+.arfid-food-name {
+	flex: 1;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.arfid-food-meta {
+	color: var(--text-muted);
+	font-size: 0.82em;
+	flex-shrink: 0;
+}
+
+.arfid-food-history {
+	margin: 0 0 0.5em 1em;
+	border-left: 2px solid var(--background-modifier-border);
+	padding-left: 0.6em;
+}
+
+.arfid-search {
+	margin-bottom: 0.6em;
+}
+
+/* --------------------------------------------------------------- toggle */
+
+.arfid-toggle {
+	display: flex;
+	gap: 0.25em;
+	background: var(--background-secondary);
+	border-radius: var(--radius-m, 8px);
+	padding: 2px;
+}
+
+.arfid-toggle-btn {
+	min-height: 40px;
+	padding: 0 0.8em;
+	border-radius: calc(var(--radius-m, 8px) - 2px);
+	background: transparent;
+	color: var(--text-muted);
+	box-shadow: none;
+	cursor: pointer;
+	font-size: 0.88em;
+}
+
+.arfid-toggle-btn.is-active {
+	background: var(--background-primary);
+	color: var(--text-normal);
+	font-weight: 600;
+}
+
+/* --------------------------------------------------------------- mobile */
+
+.is-mobile .arfid-quicklog .arfid-chip,
+.is-mobile .arfid-tab {
+	min-height: 48px;
+}
