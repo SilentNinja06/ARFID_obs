@@ -1,36 +1,27 @@
-import { App, Modal } from "obsidian";
-import { FoodNote, FoodSummary, guessMealType } from "./types";
+import { App } from "obsidian";
+import { FoodNote, FoodSummary } from "./types";
 import { buildChecklist, pickRandom } from "./chips";
 import { QuickLogModal } from "./quicklog";
+import { ArfidModal } from "./modal";
 import type ArfidTrackerPlugin from "./main";
 
 /** "I'm struggling to eat" support screen: a kindness reminder, a few
  * low-pressure safe-food options (tap one to log it), and an environment
  * checklist. Deliberately zero-obligation — closing it is always fine. */
-export class StrugglingModal extends Modal {
-	private plugin: ArfidTrackerPlugin;
+export class StrugglingModal extends ArfidModal {
 	private safeFoods: FoodSummary[] = [];
 	private notesByFood = new Map<string, FoodNote[]>();
 	private optionsEl!: HTMLElement;
 
 	constructor(app: App, plugin: ArfidTrackerPlugin) {
-		super(app);
-		this.plugin = plugin;
+		super(app, plugin, "It's okay. Let's keep this easy.");
 	}
 
-	onOpen(): void {
+	protected buildContent(): void {
 		const foods = this.plugin.store.getFoods();
 		this.safeFoods = foods.filter((f) => f.currentStatus === "safe" || f.currentStatus === "recently-expanded");
-		this.notesByFood.clear();
-		for (const n of this.plugin.store.getFoodNotes()) {
-			const list = this.notesByFood.get(n.key) ?? [];
-			list.push(n);
-			this.notesByFood.set(n.key, list);
-		}
-
+		this.notesByFood = this.plugin.store.getFoodNotesByKey();
 		const { contentEl } = this;
-		contentEl.addClass("arfid-plugin", "arfid-quicklog", "arfid-struggling");
-		this.titleEl.setText("It's okay. Let's keep this easy.");
 
 		const reminders = this.plugin.settings.kindnessReminders;
 		if (reminders.length > 0) {
@@ -84,11 +75,7 @@ export class StrugglingModal extends Modal {
 			text.createSpan({ cls: "arfid-option-meta", text: `last had ${f.lastLogged}` });
 			btn.addEventListener("click", () => {
 				this.close();
-				new QuickLogModal(this.app, this.plugin, {
-					food: f.name,
-					status: f.currentStatus,
-					meal: guessMealType(new Date()),
-				}).open();
+				new QuickLogModal(this.app, this.plugin, { food: f.name, status: f.currentStatus }).open();
 			});
 			// if this food has a ritual/order/recipe, offer it right here —
 			// the exact known-good way to eat it matters most on hard days
@@ -104,9 +91,5 @@ export class StrugglingModal extends Modal {
 				});
 			}
 		}
-	}
-
-	onClose(): void {
-		this.contentEl.empty();
 	}
 }

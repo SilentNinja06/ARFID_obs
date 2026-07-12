@@ -46,6 +46,47 @@ export const EXPOSURE_STEP_LABELS: Record<Exclude<ExposureStep, "">, string> = {
 
 export type StrategyWorked = true | false | "n/a";
 
+/** What a food-entry note records. Derived once at parse time — exposures
+ * carry `exposure: true`; baseline library imports and status changes are
+ * marked by the reserved tags the plugin writes (`baseline`,
+ * `status-change`); everything else is an eaten/attempted meal. */
+export type EntryKind = "meal" | "exposure" | "baseline" | "status-change";
+
+export function deriveEntryKind(exposure: boolean, tags: string[]): EntryKind {
+	if (exposure) return "exposure";
+	if (tags.includes("status-change")) return "status-change";
+	if (tags.includes("baseline")) return "baseline";
+	return "meal";
+}
+
+/** Entries where something was actually consumed or attempted — the only
+ * ones that count toward "meals logged" trends. */
+export function isConsumed(e: FoodEntry): boolean {
+	return e.exposure || e.meal !== "" || e.outcome !== "";
+}
+
+/** The outcome an exposure step implies, so meal stats stay coherent. */
+export function outcomeForStep(step: ExposureStep): Outcome | "" {
+	if (step === "portion") return "full";
+	if (step === "bite" || step === "tasted") return "partial";
+	return "";
+}
+
+/** A shift that counts as food expansion: movement toward trying/safe, or
+ * anything newly marked recently-expanded. */
+export function isExpansionShift(s: StatusShift): boolean {
+	return (
+		(s.from === "fear" && s.to !== "fear") ||
+		(s.from === "trying" && (s.to === "safe" || s.to === "recently-expanded")) ||
+		s.to === "recently-expanded"
+	);
+}
+
+export function findFood(foods: FoodSummary[], name: string): FoodSummary | undefined {
+	const key = normalizeFoodKey(name);
+	return foods.find((f) => f.key === key);
+}
+
 /** Per-food companion notes: eating rituals, orders that work, recipes. */
 export const NOTE_KINDS = ["ritual", "order", "recipe"] as const;
 export type NoteKind = (typeof NOTE_KINDS)[number];
@@ -64,6 +105,7 @@ export interface FoodEntry {
 	meal: MealType;
 	status: FoodStatus;
 	outcome: Outcome | "";
+	kind: EntryKind;
 	exposure: boolean;
 	exposureStep: ExposureStep;
 	statusReason: string;

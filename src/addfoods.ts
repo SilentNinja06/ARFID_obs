@@ -1,20 +1,21 @@
-import { App, Modal, Notice } from "obsidian";
-import { FOOD_STATUSES, FoodStatus, FoodSummary, STATUS_LABELS, normalizeFoodKey } from "./types";
-import { isoDate, isoTime } from "./store";
+import { App, Notice } from "obsidian";
+import { FOOD_STATUSES, FoodStatus, STATUS_LABELS, findFood, normalizeFoodKey, splitList } from "./types";
+import { nowStamp } from "./store";
 import { buildEntryNote } from "./serialize";
-import { createEntryFile } from "./quicklog";
-import { buildChoiceRow } from "./chips";
+import { saveEntryNote } from "./files";
+import { buildFoodPicker, buildStatusRow } from "./chips";
+import { ArfidModal } from "./modal";
 import { StatusChangeModal } from "./statuschange";
 import type ArfidTrackerPlugin from "./main";
 
 /** Create one baseline library entry: no meal, no outcome, nothing eaten. */
 async function createBaselineEntry(
-	app: App,
 	plugin: ArfidTrackerPlugin,
 	date: string,
 	time: string,
 	food: string,
-	status: FoodStatus
+	status: FoodStatus,
+	notice?: string
 ): Promise<void> {
 	const note = buildEntryNote({
 		date,
@@ -32,59 +33,52 @@ async function createBaselineEntry(
 		strategyWorked: "n/a",
 		tags: ["baseline"],
 	});
-	await createEntryFile(app, plugin, date, time, food, note);
+	await saveEntryNote(plugin, date, time, food, note, { notice });
 }
 
 /** Add a single food to the library at any time — for the ones remembered
  * after the initial import. Detects foods that are already tracked and hands
  * off to the status-change flow instead of duplicating them. */
-export class AddFoodModal extends Modal {
-	private plugin: ArfidTrackerPlugin;
-	private foods: FoodSummary[] = [];
+export class AddFoodModal extends ArfidModal {
 	private foodName = "";
 	private status: FoodStatus | "" = "";
 	private hintEl!: HTMLElement;
 	private saveBtn!: HTMLButtonElement;
 
 	constructor(app: App, plugin: ArfidTrackerPlugin) {
-		super(app);
-		this.plugin = plugin;
+		super(app, plugin, "Add a food to your library");
 	}
 
-	onOpen(): void {
-		this.foods = this.plugin.store.getFoods();
+	protected buildContent(): void {
+		const foods = this.plugin.store.getFoods();
 		const { contentEl } = this;
-		contentEl.addClass("arfid-plugin", "arfid-quicklog");
-		this.titleEl.setText("Add a food to your library");
 		contentEl.createDiv({
 			cls: "arfid-hint",
 			text: "Nothing is logged as eaten — this just adds the food with a status.",
 		});
 
-		const foodInput = contentEl.createEl("input", {
-			cls: "arfid-input",
-			attr: { type: "text", placeholder: "Food name", enterkeyhint: "done" },
+		const { input: foodInput } = buildFoodPicker(contentEl, foods, {
+			placeholder: "Food name",
+			onChange: (name) => {
+				this.foodName = name;
+				const known = findFood(foods, name);
+				if (known) {
+					this.hintEl.setText(
+						`${known.name} is already tracked as ${STATUS_LABELS[known.currentStatus].toLowerCase()} — saving will open the status change screen instead.`
+					);
+					this.saveBtn.setText("Change its status…");
+				} else {
+					this.hintEl.setText("");
+					this.saveBtn.setText("Add food");
+				}
+			},
 		});
 		this.hintEl = contentEl.createDiv({ cls: "arfid-hint" });
-		foodInput.addEventListener("input", () => {
-			this.foodName = foodInput.value;
-			this.updateExistingHint();
-		});
 
 		contentEl.createDiv({ cls: "arfid-field-label", text: "Status" });
-		buildChoiceRow<FoodStatus>(
-			contentEl,
-			FOOD_STATUSES.map((s) => ({ value: s, label: STATUS_LABELS[s], dotClass: `arfid-status-${s}` })),
-			"",
-			(v) => (this.status = v)
-		);
+		buildStatusRow(contentEl, "", (v) => (this.status = v));
 
-		this.saveBtn = contentEl.createEl("button", { cls: "arfid-save-btn", text: "Add food" });
-		this.saveBtn.addEventListener("click", () => void this.save());
-		this.scope.register(["Mod"], "Enter", () => {
-			void this.save();
-			return false;
-		});
+		this.saveBtn = this.addSaveButton("Add food", () => this.save());
 
 		const bulkLink = contentEl.createEl("button", {
 			cls: "arfid-details-toggle",
@@ -98,30 +92,13 @@ export class AddFoodModal extends Modal {
 		window.setTimeout(() => foodInput.focus(), 50);
 	}
 
-	private known(): FoodSummary | undefined {
-		return this.foods.find((f) => f.key === normalizeFoodKey(this.foodName));
-	}
-
-	private updateExistingHint(): void {
-		const known = this.known();
-		if (known) {
-			this.hintEl.setText(
-				`${known.name} is already tracked as ${STATUS_LABELS[known.currentStatus].toLowerCase()} — saving will open the status change screen instead.`
-			);
-			this.saveBtn.setText("Change its status…");
-		} else {
-			this.hintEl.setText("");
-			this.saveBtn.setText("Add food");
-		}
-	}
-
 	private async save(): Promise<void> {
 		const food = this.foodName.trim();
 		if (!food) {
 			new Notice("Add a food name first.");
 			return;
 		}
-		const known = this.known();
+		const known = findFood(this.plugin.store.getFoods(), food);
 		if (known) {
 			this.close();
 			new StatusChangeModal(this.app, this.plugin, known.name).open();
@@ -131,15 +108,9 @@ export class AddFoodModal extends Modal {
 			new Notice("Pick a status for it.");
 			return;
 		}
-		const now = new Date();
-		await createBaselineEntry(this.app, this.plugin, isoDate(now), isoTime(now), food, this.status);
-		new Notice(`Added ${food} as ${STATUS_LABELS[this.status].toLowerCase()}.`);
+		const { date, time } = nowStamp();
+		await createBaselineEntry(this.plugin, date, time, food, this.status, `Added ${food} as ${STATUS_LABELS[this.status].toLowerCase()}.`);
 		this.close();
-		this.plugin.notifyDataChanged();
-	}
-
-	onClose(): void {
-		this.contentEl.empty();
 	}
 }
 
@@ -148,19 +119,15 @@ export class AddFoodModal extends Modal {
  * nothing is recorded as eaten and trends are untouched. Foods already in
  * the library are skipped (use "Change a food's status" to move those, so
  * status changes always get their reason). */
-export class AddFoodsModal extends Modal {
-	private plugin: ArfidTrackerPlugin;
+export class AddFoodsModal extends ArfidModal {
 	private inputs = new Map<FoodStatus, HTMLTextAreaElement>();
 
 	constructor(app: App, plugin: ArfidTrackerPlugin) {
-		super(app);
-		this.plugin = plugin;
+		super(app, plugin, "Add foods to your library");
 	}
 
-	onOpen(): void {
+	protected buildContent(): void {
 		const { contentEl } = this;
-		contentEl.addClass("arfid-plugin", "arfid-quicklog");
-		this.titleEl.setText("Add foods to your library");
 		contentEl.createDiv({
 			cls: "arfid-hint",
 			text: "Enter the foods you already know, one per line (commas work too). Nothing here is logged as eaten — it just puts your existing lists into the system.",
@@ -177,15 +144,12 @@ export class AddFoodsModal extends Modal {
 			this.inputs.set(status, ta);
 		}
 
-		const save = contentEl.createEl("button", { cls: "arfid-save-btn", text: "Add foods" });
-		save.addEventListener("click", () => void this.save());
+		this.addSaveButton("Add foods", () => this.save());
 	}
 
 	private async save(): Promise<void> {
 		const knownKeys = new Set(this.plugin.store.getFoods().map((f) => f.key));
-		const now = new Date();
-		const date = isoDate(now);
-		const time = isoTime(now);
+		const { date, time } = nowStamp();
 
 		let added = 0;
 		const skipped: string[] = [];
@@ -193,11 +157,7 @@ export class AddFoodsModal extends Modal {
 
 		for (const status of FOOD_STATUSES) {
 			const raw = this.inputs.get(status)?.value ?? "";
-			const foods = raw
-				.split(/[\n,]/)
-				.map((s) => s.trim())
-				.filter((s) => s.length > 0);
-			for (const food of foods) {
+			for (const food of splitList(raw.replace(/\n/g, ","))) {
 				const key = normalizeFoodKey(food);
 				if (seen.has(key)) continue;
 				seen.add(key);
@@ -205,7 +165,7 @@ export class AddFoodsModal extends Modal {
 					skipped.push(food);
 					continue;
 				}
-				await createBaselineEntry(this.app, this.plugin, date, time, food, status);
+				await createBaselineEntry(this.plugin, date, time, food, status);
 				added++;
 			}
 		}
@@ -220,11 +180,6 @@ export class AddFoodsModal extends Modal {
 		}
 		new Notice(msg, skipped.length > 0 ? 8000 : 4000);
 		this.close();
-		this.plugin.notifyDataChanged();
-	}
-
-	onClose(): void {
-		this.contentEl.empty();
 	}
 }
 

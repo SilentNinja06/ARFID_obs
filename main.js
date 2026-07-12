@@ -27,7 +27,7 @@ __export(main_exports, {
   default: () => ArfidTrackerPlugin
 });
 module.exports = __toCommonJS(main_exports);
-var import_obsidian12 = require("obsidian");
+var import_obsidian13 = require("obsidian");
 
 // src/types.ts
 var FOOD_STATUSES = ["safe", "trying", "fear", "recently-expanded"];
@@ -61,6 +61,27 @@ var EXPOSURE_STEP_LABELS = {
   bite: "Took a bite",
   portion: "Ate a portion"
 };
+function deriveEntryKind(exposure, tags) {
+  if (exposure) return "exposure";
+  if (tags.includes("status-change")) return "status-change";
+  if (tags.includes("baseline")) return "baseline";
+  return "meal";
+}
+function isConsumed(e) {
+  return e.exposure || e.meal !== "" || e.outcome !== "";
+}
+function outcomeForStep(step) {
+  if (step === "portion") return "full";
+  if (step === "bite" || step === "tasted") return "partial";
+  return "";
+}
+function isExpansionShift(s) {
+  return s.from === "fear" && s.to !== "fear" || s.from === "trying" && (s.to === "safe" || s.to === "recently-expanded") || s.to === "recently-expanded";
+}
+function findFood(foods, name) {
+  const key = normalizeFoodKey(name);
+  return foods.find((f) => f.key === key);
+}
 var NOTE_KINDS = ["ritual", "order", "recipe"];
 var NOTE_KIND_LABELS = {
   ritual: "Ritual",
@@ -158,90 +179,115 @@ var ArfidSettingTab = class extends import_obsidian.PluginSettingTab {
     super(app, plugin);
     this.plugin = plugin;
   }
+  addTextSetting(name, desc, placeholder, get, set) {
+    new import_obsidian.Setting(this.containerEl).setName(name).setDesc(desc).addText(
+      (t) => t.setPlaceholder(placeholder).setValue(get()).onChange(async (v) => {
+        set(v);
+        await this.plugin.saveSettings();
+      })
+    );
+  }
+  addListSetting(name, desc, rows, get, set) {
+    new import_obsidian.Setting(this.containerEl).setName(name).setDesc(desc).addTextArea((t) => {
+      t.setValue(get().join("\n")).onChange(async (v) => {
+        set(
+          v.split("\n").map((s) => s.trim()).filter((s) => s.length > 0)
+        );
+        await this.plugin.saveSettings();
+      });
+      t.inputEl.rows = rows;
+    });
+  }
   display() {
     const { containerEl } = this;
+    const s = this.plugin.settings;
     containerEl.empty();
-    new import_obsidian.Setting(containerEl).setName("Entries folder").setDesc("Where new food entries are created. Existing entries are found by their frontmatter (type: food-entry), so moving notes later is fine.").addText(
-      (t) => t.setPlaceholder("Food Log").setValue(this.plugin.settings.entriesFolder).onChange(async (v) => {
-        this.plugin.settings.entriesFolder = v;
-        await this.plugin.saveSettings();
-      })
+    this.addTextSetting(
+      "Entries folder",
+      "Where new food entries are created. Existing entries are found by their frontmatter (type: food-entry), so moving notes later is fine.",
+      "Food Log",
+      () => s.entriesFolder,
+      (v) => s.entriesFolder = v
     );
-    new import_obsidian.Setting(containerEl).setName("Filename template").setDesc("Tokens: {{date}}, {{time}}, {{food}}.").addText(
-      (t) => t.setPlaceholder("{{date}} {{time}} {{food}}").setValue(this.plugin.settings.filenameTemplate).onChange(async (v) => {
-        this.plugin.settings.filenameTemplate = v;
-        await this.plugin.saveSettings();
-      })
+    this.addTextSetting(
+      "Filename template",
+      "Tokens: {{date}}, {{time}}, {{food}}.",
+      "{{date}} {{time}} {{food}}",
+      () => s.filenameTemplate,
+      (v) => s.filenameTemplate = v
     );
-    new import_obsidian.Setting(containerEl).setName("Exports folder").setDesc("Where CSV and summary exports are written.").addText(
-      (t) => t.setPlaceholder("Exports").setValue(this.plugin.settings.exportsFolder).onChange(async (v) => {
-        this.plugin.settings.exportsFolder = v;
-        await this.plugin.saveSettings();
-      })
+    this.addTextSetting(
+      "Exports folder",
+      "Where CSV and summary exports are written.",
+      "Exports",
+      () => s.exportsFolder,
+      (v) => s.exportsFolder = v
     );
     new import_obsidian.Setting(containerEl).setName("Daily note linking").setHeading();
     new import_obsidian.Setting(containerEl).setName("Link entries into the daily note").setDesc("Insert a link into that day's daily note whenever an entry is logged. New daily notes are seeded from the Daily Notes core plugin's template.").addToggle(
-      (t) => t.setValue(this.plugin.settings.dailyNoteLinking).onChange(async (v) => {
-        this.plugin.settings.dailyNoteLinking = v;
+      (t) => t.setValue(s.dailyNoteLinking).onChange(async (v) => {
+        s.dailyNoteLinking = v;
         await this.plugin.saveSettings();
       })
     );
-    new import_obsidian.Setting(containerEl).setName("Placement marker").setDesc("Links are inserted after this marker if the daily note contains it (invisible in reading view). Put it in your daily-note template where food links should appear.").addText(
-      (t) => t.setPlaceholder("%% arfid-log %%").setValue(this.plugin.settings.dailyNoteMarker).onChange(async (v) => {
-        this.plugin.settings.dailyNoteMarker = v;
-        await this.plugin.saveSettings();
-      })
+    this.addTextSetting(
+      "Placement marker",
+      "Links are inserted after this marker if the daily note contains it (invisible in reading view). Put it in your daily-note template where food links should appear.",
+      "%% arfid-log %%",
+      () => s.dailyNoteMarker,
+      (v) => s.dailyNoteMarker = v
     );
-    new import_obsidian.Setting(containerEl).setName("Fallback heading").setDesc("If the marker isn't found, links go under this heading wherever it sits; a heading is appended at the end only as a last resort.").addText(
-      (t) => t.setPlaceholder("Food log").setValue(this.plugin.settings.dailyNoteHeading).onChange(async (v) => {
-        this.plugin.settings.dailyNoteHeading = v;
-        await this.plugin.saveSettings();
-      })
+    this.addTextSetting(
+      "Fallback heading",
+      "If the marker isn't found, links go under this heading wherever it sits; a heading is appended at the end only as a last resort.",
+      "Food log",
+      () => s.dailyNoteHeading,
+      (v) => s.dailyNoteHeading = v
     );
     new import_obsidian.Setting(containerEl).setName("Quick-log chip lists").setHeading();
-    new import_obsidian.Setting(containerEl).setName("Known strategies").setDesc("One per line. New strategies typed during logging are added here automatically.").addTextArea((t) => {
-      t.setValue(this.plugin.settings.knownStrategies.join("\n")).onChange(async (v) => {
-        this.plugin.settings.knownStrategies = v.split("\n").map((s) => s.trim()).filter((s) => s.length > 0);
-        await this.plugin.saveSettings();
-      });
-      t.inputEl.rows = 8;
-    });
-    new import_obsidian.Setting(containerEl).setName("Known contexts").setDesc("One per line. New contexts typed during logging are added here automatically.").addTextArea((t) => {
-      t.setValue(this.plugin.settings.knownContexts.join("\n")).onChange(async (v) => {
-        this.plugin.settings.knownContexts = v.split("\n").map((s) => s.trim()).filter((s) => s.length > 0);
-        await this.plugin.saveSettings();
-      });
-      t.inputEl.rows = 6;
-    });
-    new import_obsidian.Setting(containerEl).setName("Known symptoms").setDesc("One per line. New symptoms typed during logging are added here automatically.").addTextArea((t) => {
-      t.setValue(this.plugin.settings.knownSymptoms.join("\n")).onChange(async (v) => {
-        this.plugin.settings.knownSymptoms = v.split("\n").map((s) => s.trim()).filter((s) => s.length > 0);
-        await this.plugin.saveSettings();
-      });
-      t.inputEl.rows = 6;
-    });
+    this.addListSetting(
+      "Known strategies",
+      "One per line. New strategies typed during logging are added here automatically.",
+      8,
+      () => s.knownStrategies,
+      (v) => s.knownStrategies = v
+    );
+    this.addListSetting(
+      "Known contexts",
+      "One per line. New contexts typed during logging are added here automatically.",
+      6,
+      () => s.knownContexts,
+      (v) => s.knownContexts = v
+    );
+    this.addListSetting(
+      "Known symptoms",
+      "One per line. New symptoms typed during logging are added here automatically.",
+      6,
+      () => s.knownSymptoms,
+      (v) => s.knownSymptoms = v
+    );
     new import_obsidian.Setting(containerEl).setName("Support & reminders").setHeading();
-    new import_obsidian.Setting(containerEl).setName("Kindness reminders").setDesc("One per line. A random one is shown on the \u201CI'm struggling\u201D screen.").addTextArea((t) => {
-      t.setValue(this.plugin.settings.kindnessReminders.join("\n")).onChange(async (v) => {
-        this.plugin.settings.kindnessReminders = v.split("\n").map((s) => s.trim()).filter((s) => s.length > 0);
-        await this.plugin.saveSettings();
-      });
-      t.inputEl.rows = 6;
-    });
-    new import_obsidian.Setting(containerEl).setName("Environment checklist").setDesc("One per line. Shown on the \u201CI'm struggling\u201D screen \u2014 things that make eating easier.").addTextArea((t) => {
-      t.setValue(this.plugin.settings.environmentChecklist.join("\n")).onChange(async (v) => {
-        this.plugin.settings.environmentChecklist = v.split("\n").map((s) => s.trim()).filter((s) => s.length > 0);
-        await this.plugin.saveSettings();
-      });
-      t.inputEl.rows = 6;
-    });
-    new import_obsidian.Setting(containerEl).setName("Exposure checklist").setDesc("One per line. Shown at the top of the exposure logging screen \u2014 the critical things to remember during an exposure.").addTextArea((t) => {
-      t.setValue(this.plugin.settings.exposureChecklist.join("\n")).onChange(async (v) => {
-        this.plugin.settings.exposureChecklist = v.split("\n").map((s) => s.trim()).filter((s) => s.length > 0);
-        await this.plugin.saveSettings();
-      });
-      t.inputEl.rows = 6;
-    });
+    this.addListSetting(
+      "Kindness reminders",
+      "One per line. A random one is shown on the \u201CI'm struggling\u201D screen.",
+      6,
+      () => s.kindnessReminders,
+      (v) => s.kindnessReminders = v
+    );
+    this.addListSetting(
+      "Environment checklist",
+      "One per line. Shown on the \u201CI'm struggling\u201D screen \u2014 things that make eating easier.",
+      6,
+      () => s.environmentChecklist,
+      (v) => s.environmentChecklist = v
+    );
+    this.addListSetting(
+      "Exposure checklist",
+      "One per line. Shown at the top of the exposure logging screen \u2014 the critical things to remember during an exposure.",
+      6,
+      () => s.exposureChecklist,
+      (v) => s.exposureChecklist = v
+    );
   }
 };
 
@@ -249,40 +295,76 @@ var ArfidSettingTab = class extends import_obsidian.PluginSettingTab {
 var EntryStore = class {
   constructor(app) {
     this.app = app;
+    this.index = null;
   }
-  getEntries() {
+  /** Drop the cached index; the next read rebuilds it. */
+  invalidate() {
+    this.index = null;
+  }
+  /** Whether this path was indexed as one of the plugin's notes — used to
+   * catch edits that remove a note from the dataset. */
+  contains(path) {
+    var _a, _b;
+    return (_b = (_a = this.index) == null ? void 0 : _a.paths.has(path)) != null ? _b : false;
+  }
+  getIndex() {
     var _a;
+    if (this.index) return this.index;
     const entries = [];
+    const symptoms = [];
+    const foodNotes = [];
+    const paths = /* @__PURE__ */ new Set();
     for (const file of this.app.vault.getMarkdownFiles()) {
       const fm = (_a = this.app.metadataCache.getFileCache(file)) == null ? void 0 : _a.frontmatter;
-      if (!fm || fm.type !== "food-entry") continue;
-      const entry = this.parseEntry(file, fm);
-      if (entry) entries.push(entry);
+      if (!fm) continue;
+      if (fm.type === "food-entry") {
+        const entry = parseEntry(file, fm);
+        if (entry) {
+          entries.push(entry);
+          paths.add(file.path);
+        }
+      } else if (fm.type === "symptom-entry") {
+        symptoms.push({
+          file,
+          date: normalizeDate(fm.date),
+          time: normalizeTime(fm.time),
+          symptoms: splitList(fm.symptoms)
+        });
+        paths.add(file.path);
+      } else if (fm.type === "food-note") {
+        const note = parseFoodNote(file, fm);
+        if (note) {
+          foodNotes.push(note);
+          paths.add(file.path);
+        }
+      }
     }
-    entries.sort((a, b) => sortKey(a).localeCompare(sortKey(b)));
-    return entries;
+    entries.sort((a, b) => stampOf(a).localeCompare(stampOf(b)));
+    symptoms.sort((a, b) => stampOf(a).localeCompare(stampOf(b)));
+    foodNotes.sort((a, b) => a.key.localeCompare(b.key) || a.date.localeCompare(b.date));
+    this.index = { entries, symptoms, foodNotes, paths };
+    return this.index;
   }
-  parseEntry(file, fm) {
-    var _a, _b, _c;
-    const food = String((_a = fm.food) != null ? _a : "").trim();
-    if (!food) return null;
-    return {
-      file,
-      date: normalizeDate(fm.date),
-      time: normalizeTime(fm.time),
-      food,
-      meal: normalizeMeal(fm.meal),
-      status: normalizeStatus(fm.status),
-      outcome: normalizeOutcome(fm.outcome),
-      exposure: fm.exposure === true || fm.exposure === "true",
-      exposureStep: normalizeExposureStep(fm.exposure_step),
-      statusReason: String((_b = fm.status_reason) != null ? _b : "").trim(),
-      textureNotes: String((_c = fm.texture_notes) != null ? _c : ""),
-      context: splitList(fm.context),
-      strategies: splitList(fm.strategy_used),
-      strategyWorked: normalizeWorked(fm.strategy_worked),
-      tags: splitList(fm.tags)
-    };
+  getEntries() {
+    return this.getIndex().entries;
+  }
+  /** Standalone symptom logs (`type: symptom-entry`), chronological. */
+  getSymptomEntries() {
+    return this.getIndex().symptoms;
+  }
+  /** Per-food companion notes (`type: food-note`): rituals, orders, recipes. */
+  getFoodNotes() {
+    return this.getIndex().foodNotes;
+  }
+  getFoodNotesByKey() {
+    var _a;
+    const byKey = /* @__PURE__ */ new Map();
+    for (const n of this.getFoodNotes()) {
+      const list = (_a = byKey.get(n.key)) != null ? _a : [];
+      list.push(n);
+      byKey.set(n.key, list);
+    }
+    return byKey;
   }
   /** All foods ever logged, keyed by normalized name, chronological entries. */
   getFoods(entries) {
@@ -322,59 +404,6 @@ var EntryStore = class {
     shifts.sort((a, b) => a.date.localeCompare(b.date));
     return shifts;
   }
-  /** Standalone symptom logs (`type: symptom-entry`), chronological. */
-  getSymptomEntries() {
-    var _a;
-    const out = [];
-    for (const file of this.app.vault.getMarkdownFiles()) {
-      const fm = (_a = this.app.metadataCache.getFileCache(file)) == null ? void 0 : _a.frontmatter;
-      if (!fm || fm.type !== "symptom-entry") continue;
-      out.push({
-        file,
-        date: normalizeDate(fm.date),
-        time: normalizeTime(fm.time),
-        symptoms: splitList(fm.symptoms)
-      });
-    }
-    out.sort((a, b) => `${a.date} ${a.time}`.localeCompare(`${b.date} ${b.time}`));
-    return out;
-  }
-  getSymptomStats(entries) {
-    const byName = /* @__PURE__ */ new Map();
-    for (const e of entries != null ? entries : this.getSymptomEntries()) {
-      for (const raw of e.symptoms) {
-        const key = raw.toLowerCase();
-        let s = byName.get(key);
-        if (!s) {
-          s = { name: raw, count: 0 };
-          byName.set(key, s);
-        }
-        s.count++;
-      }
-    }
-    return [...byName.values()].sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
-  }
-  /** Per-food companion notes (`type: food-note`): rituals, orders, recipes. */
-  getFoodNotes() {
-    var _a, _b, _c;
-    const out = [];
-    for (const file of this.app.vault.getMarkdownFiles()) {
-      const fm = (_a = this.app.metadataCache.getFileCache(file)) == null ? void 0 : _a.frontmatter;
-      if (!fm || fm.type !== "food-note") continue;
-      const food = String((_b = fm.food) != null ? _b : "").trim();
-      if (!food) continue;
-      const kind = String((_c = fm.note_kind) != null ? _c : "").trim().toLowerCase();
-      out.push({
-        file,
-        food,
-        key: normalizeFoodKey(food),
-        kind: NOTE_KINDS.includes(kind) ? kind : "ritual",
-        date: normalizeDate(fm.date)
-      });
-    }
-    out.sort((a, b) => a.key.localeCompare(b.key) || a.date.localeCompare(b.date));
-    return out;
-  }
   getStrategyStats(entries) {
     const byName = /* @__PURE__ */ new Map();
     for (const e of entries != null ? entries : this.getEntries()) {
@@ -394,8 +423,61 @@ var EntryStore = class {
     }
     return [...byName.values()].sort((a, b) => b.uses - a.uses || a.name.localeCompare(b.name));
   }
+  getSymptomStats(entries) {
+    const byName = /* @__PURE__ */ new Map();
+    for (const e of entries != null ? entries : this.getSymptomEntries()) {
+      for (const raw of e.symptoms) {
+        const key = raw.toLowerCase();
+        let s = byName.get(key);
+        if (!s) {
+          s = { name: raw, count: 0 };
+          byName.set(key, s);
+        }
+        s.count++;
+      }
+    }
+    return [...byName.values()].sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
+  }
 };
-function sortKey(e) {
+function parseEntry(file, fm) {
+  var _a, _b, _c;
+  const food = String((_a = fm.food) != null ? _a : "").trim();
+  if (!food) return null;
+  const exposure = fm.exposure === true || fm.exposure === "true";
+  const tags = splitList(fm.tags);
+  return {
+    file,
+    date: normalizeDate(fm.date),
+    time: normalizeTime(fm.time),
+    food,
+    meal: normalizeMeal(fm.meal),
+    status: normalizeStatus(fm.status),
+    outcome: normalizeOutcome(fm.outcome),
+    kind: deriveEntryKind(exposure, tags),
+    exposure,
+    exposureStep: normalizeExposureStep(fm.exposure_step),
+    statusReason: String((_b = fm.status_reason) != null ? _b : "").trim(),
+    textureNotes: String((_c = fm.texture_notes) != null ? _c : ""),
+    context: splitList(fm.context),
+    strategies: splitList(fm.strategy_used),
+    strategyWorked: normalizeWorked(fm.strategy_worked),
+    tags
+  };
+}
+function parseFoodNote(file, fm) {
+  var _a, _b;
+  const food = String((_a = fm.food) != null ? _a : "").trim();
+  if (!food) return null;
+  const kind = String((_b = fm.note_kind) != null ? _b : "").trim().toLowerCase();
+  return {
+    file,
+    food,
+    key: normalizeFoodKey(food),
+    kind: NOTE_KINDS.includes(kind) ? kind : "ritual",
+    date: normalizeDate(fm.date)
+  };
+}
+function stampOf(e) {
   return `${e.date} ${e.time}`;
 }
 function normalizeDate(value) {
@@ -444,9 +526,16 @@ function isoDate(d) {
 function isoTime(d) {
   return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
 }
+function nowStamp() {
+  const now = /* @__PURE__ */ new Date();
+  return { date: isoDate(now), time: isoTime(now) };
+}
+function daysAgoIso(days) {
+  return isoDate(new Date(Date.now() - days * 864e5));
+}
 
 // src/quicklog.ts
-var import_obsidian3 = require("obsidian");
+var import_obsidian5 = require("obsidian");
 
 // src/serialize.ts
 function needsQuotes(s) {
@@ -521,6 +610,9 @@ function sanitizeForFilename(s) {
   return s.replace(/[\\/:*?"<>|#^\[\]]/g, " ").replace(/\s+/g, " ").trim();
 }
 
+// src/files.ts
+var import_obsidian3 = require("obsidian");
+
 // src/dailynote.ts
 var import_obsidian2 = require("obsidian");
 var PLUGIN_LINE = /^- \d{2}:\d{2} \[\[/;
@@ -575,7 +667,7 @@ function insertLogLine(content, line, settings, time) {
   const marker = settings.dailyNoteMarker.trim();
   let anchor = -1;
   if (marker) {
-    anchor = lines.findIndex((l) => l.trim() === marker || l.includes(marker));
+    anchor = lines.findIndex((l) => l.includes(marker));
   }
   if (anchor === -1) {
     const heading = settings.dailyNoteHeading.trim().toLowerCase().replace(/:$/, "");
@@ -601,6 +693,47 @@ ${line}
   }
   lines.splice(insertAt, 0, line);
   return lines.join("\n");
+}
+
+// src/files.ts
+function normalizeFolder(folder) {
+  return folder.trim().replace(/\/+$/, "");
+}
+async function ensureFolder(app, folder) {
+  const f = normalizeFolder(folder);
+  if (!f) return;
+  if (app.vault.getAbstractFileByPath((0, import_obsidian3.normalizePath)(f)) instanceof import_obsidian3.TFolder) return;
+  await app.vault.createFolder((0, import_obsidian3.normalizePath)(f)).catch(() => {
+  });
+}
+async function createUniqueNote(app, folder, base, content) {
+  const f = normalizeFolder(folder);
+  await ensureFolder(app, f);
+  let path = (0, import_obsidian3.normalizePath)((f ? f + "/" : "") + base + ".md");
+  let n = 1;
+  while (app.vault.getAbstractFileByPath(path)) {
+    path = (0, import_obsidian3.normalizePath)((f ? f + "/" : "") + `${base} ${++n}.md`);
+  }
+  return app.vault.create(path, content);
+}
+async function createEntryFile(app, plugin, date, time, food, content) {
+  const base = sanitizeForFilename(
+    plugin.settings.filenameTemplate.replace(/{{\s*date\s*}}/gi, date).replace(/{{\s*time\s*}}/gi, time.replace(":", ".")).replace(/{{\s*food\s*}}/gi, food)
+  ) || `${date} ${time.replace(":", ".")} ${sanitizeForFilename(food)}`;
+  return createUniqueNote(app, plugin.settings.entriesFolder, base, content);
+}
+async function saveEntryNote(plugin, date, time, food, content, opts = {}) {
+  const file = await createEntryFile(plugin.app, plugin, date, time, food, content);
+  if (opts.dailyLabel && plugin.settings.dailyNoteLinking) {
+    try {
+      await linkIntoDailyNote(plugin.app, plugin.settings, date, time, file.basename, opts.dailyLabel);
+    } catch (e) {
+      console.error("ARFID Tracker: daily note linking failed", e);
+    }
+  }
+  if (opts.notice) new import_obsidian3.Notice(opts.notice);
+  plugin.notifyDataChanged();
+  return file;
 }
 
 // src/chips.ts
@@ -633,6 +766,14 @@ function buildChoiceRow(parent, options, initial, onChoose, allowDeselect = fals
     }
   };
 }
+function buildStatusRow(parent, initial, onChoose) {
+  return buildChoiceRow(
+    parent,
+    FOOD_STATUSES.map((s) => ({ value: s, label: STATUS_LABELS[s], dotClass: `arfid-status-${s}` })),
+    initial,
+    onChoose
+  );
+}
 function buildChipPicker(parent, label, known, selected, onChange) {
   parent.createDiv({ cls: "arfid-field-label", text: label });
   const row = parent.createDiv({ cls: "arfid-chip-row arfid-chip-wrap" });
@@ -645,6 +786,7 @@ function buildChipPicker(parent, label, known, selected, onChange) {
       chip.toggleClass("is-selected", selected.has(item));
       onChange == null ? void 0 : onChange();
     });
+    return chip;
   };
   for (const item of known) addChip(item);
   const addRow = parent.createDiv({ cls: "arfid-add-row" });
@@ -657,14 +799,18 @@ function buildChipPicker(parent, label, known, selected, onChange) {
     const v = input.value.trim();
     if (!v) return;
     input.value = "";
-    if (!known.some((k) => k.toLowerCase() === v.toLowerCase())) {
+    selected.add(v);
+    const existing = known.find((k) => k.toLowerCase() === v.toLowerCase());
+    if (existing) {
+      selected.delete(v);
+      selected.add(existing);
+      row.querySelectorAll(".arfid-choice").forEach((c) => {
+        if (c.textContent === existing) c.addClass("is-selected");
+      });
+    } else {
       known.push(v);
       addChip(v);
     }
-    selected.add(v);
-    row.querySelectorAll(".arfid-choice").forEach((c) => {
-      if (c.textContent === v) c.addClass("is-selected");
-    });
     onChange == null ? void 0 : onChange();
   };
   addBtn.addEventListener("click", commit);
@@ -674,6 +820,60 @@ function buildChipPicker(parent, label, known, selected, onChange) {
       commit();
     }
   });
+}
+function buildFoodPicker(parent, foods, opts) {
+  var _a;
+  const sorted = [...foods].sort(
+    (_a = opts.sort) != null ? _a : (a, b) => b.lastLogged.localeCompare(a.lastLogged)
+  );
+  const input = parent.createEl("input", {
+    cls: "arfid-input",
+    attr: { type: "text", placeholder: opts.placeholder, enterkeyhint: "done" }
+  });
+  if (opts.initial) input.value = opts.initial;
+  const suggestions = parent.createDiv({ cls: "arfid-suggestions" });
+  const render = () => {
+    suggestions.empty();
+    const q = normalizeFoodKey(input.value);
+    const matches = sorted.filter((f) => (!q || f.key.includes(q)) && f.key !== q).slice(0, 6);
+    for (const f of matches) {
+      const chip = suggestions.createEl("button", { cls: "arfid-chip arfid-suggestion" });
+      chip.createSpan({ cls: `arfid-status-dot arfid-status-${f.currentStatus}` });
+      chip.createSpan({ text: f.name });
+      chip.addEventListener("click", () => {
+        input.value = f.name;
+        render();
+        opts.onChange(f.name);
+      });
+    }
+  };
+  input.addEventListener("input", () => {
+    render();
+    opts.onChange(input.value);
+  });
+  render();
+  return { input };
+}
+function buildStrategySection(parent, knownStrategies, selected, setWorked) {
+  let workedSection;
+  const updateVisibility = () => {
+    if (selected.size > 0) workedSection.show();
+    else workedSection.hide();
+  };
+  buildChipPicker(parent, "Strategies used", knownStrategies, selected, updateVisibility);
+  workedSection = parent.createDiv();
+  workedSection.createDiv({ cls: "arfid-field-label", text: "Did the strategy help?" });
+  buildChoiceRow(
+    workedSection,
+    [
+      { value: "true", label: "Helped" },
+      { value: "false", label: "Didn't help" },
+      { value: "n/a", label: "Not sure" }
+    ],
+    "n/a",
+    (v) => setWorked(v === "true" ? true : v === "false" ? false : "n/a")
+  );
+  updateVisibility();
 }
 function buildChecklist(parent, label, items) {
   if (items.length === 0) return;
@@ -694,10 +894,37 @@ function pickRandom(items, count) {
   return pool.slice(0, count);
 }
 
-// src/quicklog.ts
-var QuickLogModal = class extends import_obsidian3.Modal {
-  constructor(app, plugin, prefill = {}) {
+// src/modal.ts
+var import_obsidian4 = require("obsidian");
+var ArfidModal = class extends import_obsidian4.Modal {
+  constructor(app, plugin, title) {
     super(app);
+    this.title = title;
+    this.plugin = plugin;
+  }
+  onOpen() {
+    this.contentEl.addClass("arfid-plugin", "arfid-quicklog");
+    this.titleEl.setText(this.title);
+    this.buildContent();
+  }
+  addSaveButton(label, onSave) {
+    const btn = this.contentEl.createEl("button", { cls: "arfid-save-btn", text: label });
+    btn.addEventListener("click", () => void onSave());
+    this.scope.register(["Mod"], "Enter", () => {
+      void onSave();
+      return false;
+    });
+    return btn;
+  }
+  onClose() {
+    this.contentEl.empty();
+  }
+};
+
+// src/quicklog.ts
+var QuickLogModal = class extends ArfidModal {
+  constructor(app, plugin, prefill = {}) {
+    super(app, plugin, "Log a food");
     this.foods = [];
     this.foodName = "";
     this.meal = "";
@@ -711,10 +938,9 @@ var QuickLogModal = class extends import_obsidian3.Modal {
     this.strategyWorked = "n/a";
     this.tagsText = "";
     this.statusSetter = null;
-    this.plugin = plugin;
     this.prefill = prefill;
   }
-  onOpen() {
+  buildContent() {
     var _a, _b;
     this.foods = this.plugin.store.getFoods();
     this.foodName = (_a = this.prefill.food) != null ? _a : "";
@@ -724,44 +950,16 @@ var QuickLogModal = class extends import_obsidian3.Modal {
       this.statusTouched = true;
     }
     const { contentEl } = this;
-    contentEl.addClass("arfid-plugin", "arfid-quicklog");
-    this.titleEl.setText("Log a food");
-    const foodInput = contentEl.createEl("input", {
-      cls: "arfid-input",
-      attr: { type: "text", placeholder: "Food (e.g. scrambled eggs)", enterkeyhint: "done" }
-    });
-    foodInput.value = this.foodName;
-    const suggestions = contentEl.createDiv({ cls: "arfid-suggestions" });
-    const renderSuggestions = () => {
-      suggestions.empty();
-      const q = normalizeFoodKey(foodInput.value);
-      let matches;
-      if (!q) {
-        matches = [...this.foods].sort((a, b) => b.lastLogged.localeCompare(a.lastLogged)).slice(0, 6);
-      } else {
-        matches = this.foods.filter((f) => f.key.includes(q) && f.key !== q).slice(0, 6);
+    const { input: foodInput } = buildFoodPicker(contentEl, this.foods, {
+      placeholder: "Food (e.g. scrambled eggs)",
+      initial: this.foodName,
+      onChange: (name) => {
+        this.foodName = name;
+        const known = findFood(this.foods, name);
+        if (known && !this.statusTouched) this.setStatus(known.currentStatus, false);
+        this.updateReasonVisibility();
       }
-      for (const f of matches) {
-        const chip = suggestions.createEl("button", { cls: "arfid-chip arfid-suggestion" });
-        chip.createSpan({ cls: `arfid-status-dot arfid-status-${f.currentStatus}` });
-        chip.createSpan({ text: f.name });
-        chip.addEventListener("click", () => {
-          foodInput.value = f.name;
-          this.foodName = f.name;
-          if (!this.statusTouched) this.setStatus(f.currentStatus, false);
-          renderSuggestions();
-          this.updateReasonVisibility();
-        });
-      }
-    };
-    foodInput.addEventListener("input", () => {
-      this.foodName = foodInput.value;
-      const known = this.foods.find((f) => f.key === normalizeFoodKey(foodInput.value));
-      if (known && !this.statusTouched) this.setStatus(known.currentStatus, false);
-      renderSuggestions();
-      this.updateReasonVisibility();
     });
-    renderSuggestions();
     contentEl.createDiv({ cls: "arfid-field-label", text: "Meal" });
     buildChoiceRow(
       contentEl,
@@ -771,14 +969,9 @@ var QuickLogModal = class extends import_obsidian3.Modal {
       true
     );
     contentEl.createDiv({ cls: "arfid-field-label", text: "Status" });
-    this.statusSetter = buildChoiceRow(
-      contentEl,
-      FOOD_STATUSES.map((s) => ({ value: s, label: STATUS_LABELS[s], dotClass: `arfid-status-${s}` })),
-      this.status,
-      (v) => {
-        if (v !== "") this.setStatus(v, true);
-      }
-    );
+    this.statusSetter = buildStatusRow(contentEl, this.status, (v) => {
+      if (v !== "") this.setStatus(v, true);
+    });
     this.reasonSection = contentEl.createDiv();
     this.reasonSection.createDiv({ cls: "arfid-field-label", text: "What changed? (why is this food moving?)" });
     const reason = this.reasonSection.createEl("textarea", {
@@ -807,26 +1000,7 @@ var QuickLogModal = class extends import_obsidian3.Modal {
       else details.show();
       detailsToggle.setText(open ? "Add details" : "Hide details");
     });
-    buildChipPicker(
-      details,
-      "Strategies used",
-      this.plugin.settings.knownStrategies,
-      this.strategies,
-      () => this.updateWorkedVisibility()
-    );
-    this.workedSection = details.createDiv();
-    this.workedSection.createDiv({ cls: "arfid-field-label", text: "Did the strategy help?" });
-    buildChoiceRow(
-      this.workedSection,
-      [
-        { value: "true", label: "Helped" },
-        { value: "false", label: "Didn't help" },
-        { value: "n/a", label: "Not sure" }
-      ],
-      "n/a",
-      (v) => this.strategyWorked = v === "true" ? true : v === "false" ? false : "n/a"
-    );
-    this.updateWorkedVisibility();
+    buildStrategySection(details, this.plugin.settings.knownStrategies, this.strategies, (w) => this.strategyWorked = w);
     buildChipPicker(details, "Context", this.plugin.settings.knownContexts, this.contexts);
     details.createDiv({ cls: "arfid-field-label", text: "Texture notes" });
     const texture = details.createEl("textarea", {
@@ -840,12 +1014,7 @@ var QuickLogModal = class extends import_obsidian3.Modal {
       attr: { type: "text", placeholder: "comma, separated" }
     });
     tags.addEventListener("input", () => this.tagsText = tags.value);
-    const save = contentEl.createEl("button", { cls: "arfid-save-btn", text: "Save entry" });
-    save.addEventListener("click", () => void this.save());
-    this.scope.register(["Mod"], "Enter", () => {
-      void this.save();
-      return false;
-    });
+    this.addSaveButton("Save entry", () => this.save());
     if (!this.foodName) window.setTimeout(() => foodInput.focus(), 50);
   }
   setStatus(s, touched) {
@@ -858,25 +1027,19 @@ var QuickLogModal = class extends import_obsidian3.Modal {
   /** Ask "what changed?" only when this entry moves a known food to a new status. */
   updateReasonVisibility() {
     if (!this.reasonSection) return;
-    const known = this.foods.find((f) => f.key === normalizeFoodKey(this.foodName));
+    const known = findFood(this.foods, this.foodName);
     if (known && known.currentStatus !== this.status) this.reasonSection.show();
     else this.reasonSection.hide();
-  }
-  updateWorkedVisibility() {
-    if (this.strategies.size > 0) this.workedSection.show();
-    else this.workedSection.hide();
   }
   async save() {
     const food = this.foodName.trim();
     if (!food) {
-      new import_obsidian3.Notice("Add a food name first.");
+      new import_obsidian5.Notice("Add a food name first.");
       return;
     }
-    const now = /* @__PURE__ */ new Date();
-    const date = isoDate(now);
-    const time = isoTime(now);
+    const { date, time } = nowStamp();
     const strategies = [...this.strategies];
-    const known = this.foods.find((f) => f.key === normalizeFoodKey(food));
+    const known = findFood(this.foods, food);
     const isShift = !!known && known.currentStatus !== this.status;
     const note = buildEntryNote({
       date,
@@ -892,49 +1055,24 @@ var QuickLogModal = class extends import_obsidian3.Modal {
       context: [...this.contexts],
       strategies,
       strategyWorked: strategies.length > 0 ? this.strategyWorked : "n/a",
-      tags: this.tagsText.split(",").map((t) => t.trim()).filter((t) => t.length > 0)
+      tags: splitList(this.tagsText)
     });
-    const file = await createEntryFile(this.app, this.plugin, date, time, food, note);
     await this.plugin.saveSettings();
-    if (this.plugin.settings.dailyNoteLinking) {
-      const mealPrefix = this.meal ? `${this.meal}: ` : "";
-      const label = `${mealPrefix}${food} \u2014 ${STATUS_LABELS[this.status].toLowerCase()}${this.outcome ? ", " + this.outcome : ""}`;
-      try {
-        await linkIntoDailyNote(this.app, this.plugin.settings, date, time, file.basename, label);
-      } catch (e) {
-        console.error("ARFID Tracker: daily note linking failed", e);
-      }
-    }
-    new import_obsidian3.Notice(`Logged ${food}`);
+    const mealPrefix = this.meal ? `${this.meal}: ` : "";
+    await saveEntryNote(this.plugin, date, time, food, note, {
+      dailyLabel: `${mealPrefix}${food} \u2014 ${STATUS_LABELS[this.status].toLowerCase()}${this.outcome ? ", " + this.outcome : ""}`,
+      notice: `Logged ${food}`
+    });
     this.close();
-    this.plugin.notifyDataChanged();
-  }
-  onClose() {
-    this.contentEl.empty();
   }
 };
-async function createEntryFile(app, plugin, date, time, food, content) {
-  const folder = plugin.settings.entriesFolder.trim().replace(/\/+$/, "");
-  if (folder && !(app.vault.getAbstractFileByPath((0, import_obsidian3.normalizePath)(folder)) instanceof import_obsidian3.TFolder)) {
-    await app.vault.createFolder((0, import_obsidian3.normalizePath)(folder)).catch(() => {
-    });
-  }
-  const base = sanitizeForFilename(
-    plugin.settings.filenameTemplate.replace(/{{\s*date\s*}}/gi, date).replace(/{{\s*time\s*}}/gi, time.replace(":", ".")).replace(/{{\s*food\s*}}/gi, food)
-  ) || `${date} ${time.replace(":", ".")} ${sanitizeForFilename(food)}`;
-  let path = (0, import_obsidian3.normalizePath)((folder ? folder + "/" : "") + base + ".md");
-  let n = 1;
-  while (app.vault.getAbstractFileByPath(path)) {
-    path = (0, import_obsidian3.normalizePath)((folder ? folder + "/" : "") + `${base} ${++n}.md`);
-  }
-  return app.vault.create(path, content);
-}
 
 // src/exposure.ts
-var import_obsidian4 = require("obsidian");
-var ExposureModal = class extends import_obsidian4.Modal {
+var import_obsidian6 = require("obsidian");
+var statusRank = { fear: 0, trying: 1, safe: 2, "recently-expanded": 2 };
+var ExposureModal = class extends ArfidModal {
   constructor(app, plugin, prefillFood) {
-    super(app);
+    super(app, plugin, "Log an exposure");
     this.foods = [];
     this.foodName = "";
     this.status = "fear";
@@ -945,58 +1083,28 @@ var ExposureModal = class extends import_obsidian4.Modal {
     this.strategyWorked = "n/a";
     this.thoughts = "";
     this.statusSetter = null;
-    this.plugin = plugin;
     if (prefillFood) this.foodName = prefillFood;
   }
-  onOpen() {
+  buildContent() {
     this.foods = this.plugin.store.getFoods();
     const { contentEl } = this;
-    contentEl.addClass("arfid-plugin", "arfid-quicklog", "arfid-exposure");
-    this.titleEl.setText("Log an exposure");
     buildChecklist(contentEl, "During the exposure", this.plugin.settings.exposureChecklist);
     contentEl.createDiv({ cls: "arfid-field-label", text: "Food" });
-    const foodInput = contentEl.createEl("input", {
-      cls: "arfid-input",
-      attr: { type: "text", placeholder: "Which food?", enterkeyhint: "done" }
-    });
-    foodInput.value = this.foodName;
-    const suggestions = contentEl.createDiv({ cls: "arfid-suggestions" });
-    const candidates = () => {
-      const q = normalizeFoodKey(foodInput.value);
-      const pool = [...this.foods].sort((a, b) => {
-        const rank = (f) => f.currentStatus === "fear" ? 0 : f.currentStatus === "trying" ? 1 : 2;
-        return rank(a) - rank(b) || b.lastLogged.localeCompare(a.lastLogged);
-      });
-      return pool.filter((f) => (!q || f.key.includes(q)) && f.key !== q).slice(0, 6);
-    };
-    const syncStatusToKnown = () => {
-      var _a;
-      const known = this.foods.find((f) => f.key === normalizeFoodKey(foodInput.value));
-      if (known && !this.statusTouched) {
-        this.status = known.currentStatus;
-        (_a = this.statusSetter) == null ? void 0 : _a.set(known.currentStatus);
+    const { input: foodInput } = buildFoodPicker(contentEl, this.foods, {
+      placeholder: "Which food?",
+      initial: this.foodName,
+      // fear foods first — they're what exposures are usually about
+      sort: (a, b) => statusRank[a.currentStatus] - statusRank[b.currentStatus] || b.lastLogged.localeCompare(a.lastLogged),
+      onChange: (name) => {
+        var _a;
+        this.foodName = name;
+        const known2 = findFood(this.foods, name);
+        if (known2 && !this.statusTouched) {
+          this.status = known2.currentStatus;
+          (_a = this.statusSetter) == null ? void 0 : _a.set(known2.currentStatus);
+        }
       }
-    };
-    const renderSuggestions = () => {
-      suggestions.empty();
-      for (const f of candidates()) {
-        const chip = suggestions.createEl("button", { cls: "arfid-chip arfid-suggestion" });
-        chip.createSpan({ cls: `arfid-status-dot arfid-status-${f.currentStatus}` });
-        chip.createSpan({ text: f.name });
-        chip.addEventListener("click", () => {
-          foodInput.value = f.name;
-          this.foodName = f.name;
-          syncStatusToKnown();
-          renderSuggestions();
-        });
-      }
-    };
-    foodInput.addEventListener("input", () => {
-      this.foodName = foodInput.value;
-      syncStatusToKnown();
-      renderSuggestions();
     });
-    renderSuggestions();
     contentEl.createDiv({ cls: "arfid-field-label", text: "How far did it go? (any step counts)" });
     buildChoiceRow(
       contentEl,
@@ -1006,75 +1114,43 @@ var ExposureModal = class extends import_obsidian4.Modal {
       true
     );
     contentEl.createDiv({ cls: "arfid-field-label", text: "Status" });
-    this.statusSetter = buildChoiceRow(
-      contentEl,
-      FOOD_STATUSES.map((s) => ({ value: s, label: STATUS_LABELS[s], dotClass: `arfid-status-${s}` })),
-      this.status,
-      (v) => {
-        if (v !== "") {
-          this.status = v;
-          this.statusTouched = true;
-        }
+    this.statusSetter = buildStatusRow(contentEl, this.status, (v) => {
+      if (v !== "") {
+        this.status = v;
+        this.statusTouched = true;
       }
-    );
-    syncStatusToKnown();
+    });
+    const known = findFood(this.foods, this.foodName);
+    if (known && !this.statusTouched) {
+      this.status = known.currentStatus;
+      this.statusSetter.set(known.currentStatus);
+    }
     buildChipPicker(contentEl, "Environment & context", this.plugin.settings.knownContexts, this.contexts);
-    buildChipPicker(
-      contentEl,
-      "Strategies used",
-      this.plugin.settings.knownStrategies,
-      this.strategies,
-      () => this.updateWorkedVisibility()
-    );
-    this.workedSection = contentEl.createDiv();
-    this.workedSection.createDiv({ cls: "arfid-field-label", text: "Did the strategy help?" });
-    buildChoiceRow(
-      this.workedSection,
-      [
-        { value: "true", label: "Helped" },
-        { value: "false", label: "Didn't help" },
-        { value: "n/a", label: "Not sure" }
-      ],
-      "n/a",
-      (v) => this.strategyWorked = v === "true" ? true : v === "false" ? false : "n/a"
-    );
-    this.updateWorkedVisibility();
+    buildStrategySection(contentEl, this.plugin.settings.knownStrategies, this.strategies, (w) => this.strategyWorked = w);
     contentEl.createDiv({ cls: "arfid-field-label", text: "How did it go? (saved into the note)" });
     const thoughts = contentEl.createEl("textarea", {
       cls: "arfid-textarea",
       attr: { rows: "3", placeholder: "What happened, what it felt like, what the next step could be\u2026" }
     });
     thoughts.addEventListener("input", () => this.thoughts = thoughts.value);
-    const save = contentEl.createEl("button", { cls: "arfid-save-btn", text: "Save exposure" });
-    save.addEventListener("click", () => void this.save());
-    this.scope.register(["Mod"], "Enter", () => {
-      void this.save();
-      return false;
-    });
+    this.addSaveButton("Save exposure", () => this.save());
     if (!this.foodName) window.setTimeout(() => foodInput.focus(), 50);
-  }
-  updateWorkedVisibility() {
-    if (this.strategies.size > 0) this.workedSection.show();
-    else this.workedSection.hide();
   }
   async save() {
     const food = this.foodName.trim();
     if (!food) {
-      new import_obsidian4.Notice("Add a food name first.");
+      new import_obsidian6.Notice("Add a food name first.");
       return;
     }
-    const now = /* @__PURE__ */ new Date();
-    const date = isoDate(now);
-    const time = isoTime(now);
+    const { date, time } = nowStamp();
     const strategies = [...this.strategies];
-    const outcome = this.step === "portion" ? "full" : this.step === "bite" || this.step === "tasted" ? "partial" : "";
     const note = buildEntryNote({
       date,
       time,
       food,
       meal: "",
       status: this.status,
-      outcome,
+      outcome: outcomeForStep(this.step),
       exposure: true,
       exposureStep: this.step,
       statusReason: "",
@@ -1085,48 +1161,28 @@ var ExposureModal = class extends import_obsidian4.Modal {
       tags: [],
       body: this.thoughts.trim()
     });
-    const file = await createEntryFile(this.app, this.plugin, date, time, food, note);
     await this.plugin.saveSettings();
-    if (this.plugin.settings.dailyNoteLinking) {
-      const stepLabel = this.step ? EXPOSURE_STEP_LABELS[this.step].toLowerCase() : "exposure";
-      const label = `exposure: ${food} \u2014 ${stepLabel}`;
-      try {
-        await linkIntoDailyNote(this.app, this.plugin.settings, date, time, file.basename, label);
-      } catch (e) {
-        console.error("ARFID Tracker: daily note linking failed", e);
-      }
-    }
-    new import_obsidian4.Notice(`Exposure logged \u2014 nice work with ${food}.`);
+    const stepLabel = this.step ? EXPOSURE_STEP_LABELS[this.step].toLowerCase() : "exposure";
+    await saveEntryNote(this.plugin, date, time, food, note, {
+      dailyLabel: `exposure: ${food} \u2014 ${stepLabel}`,
+      notice: `Exposure logged \u2014 nice work with ${food}.`
+    });
     this.close();
-    this.plugin.notifyDataChanged();
-  }
-  onClose() {
-    this.contentEl.empty();
   }
 };
 
 // src/struggling.ts
-var import_obsidian5 = require("obsidian");
-var StrugglingModal = class extends import_obsidian5.Modal {
+var StrugglingModal = class extends ArfidModal {
   constructor(app, plugin) {
-    super(app);
+    super(app, plugin, "It's okay. Let's keep this easy.");
     this.safeFoods = [];
     this.notesByFood = /* @__PURE__ */ new Map();
-    this.plugin = plugin;
   }
-  onOpen() {
-    var _a;
+  buildContent() {
     const foods = this.plugin.store.getFoods();
     this.safeFoods = foods.filter((f) => f.currentStatus === "safe" || f.currentStatus === "recently-expanded");
-    this.notesByFood.clear();
-    for (const n of this.plugin.store.getFoodNotes()) {
-      const list = (_a = this.notesByFood.get(n.key)) != null ? _a : [];
-      list.push(n);
-      this.notesByFood.set(n.key, list);
-    }
+    this.notesByFood = this.plugin.store.getFoodNotesByKey();
     const { contentEl } = this;
-    contentEl.addClass("arfid-plugin", "arfid-quicklog", "arfid-struggling");
-    this.titleEl.setText("It's okay. Let's keep this easy.");
     const reminders = this.plugin.settings.kindnessReminders;
     if (reminders.length > 0) {
       contentEl.createDiv({ cls: "arfid-kindness", text: pickRandom(reminders, 1)[0] });
@@ -1174,11 +1230,7 @@ var StrugglingModal = class extends import_obsidian5.Modal {
       text.createSpan({ cls: "arfid-option-meta", text: `last had ${f.lastLogged}` });
       btn.addEventListener("click", () => {
         this.close();
-        new QuickLogModal(this.app, this.plugin, {
-          food: f.name,
-          status: f.currentStatus,
-          meal: guessMealType(/* @__PURE__ */ new Date())
-        }).open();
+        new QuickLogModal(this.app, this.plugin, { food: f.name, status: f.currentStatus }).open();
       });
       const notes = (_a = this.notesByFood.get(f.key)) != null ? _a : [];
       if (notes.length > 0) {
@@ -1193,24 +1245,18 @@ var StrugglingModal = class extends import_obsidian5.Modal {
       }
     }
   }
-  onClose() {
-    this.contentEl.empty();
-  }
 };
 
 // src/symptoms.ts
-var import_obsidian6 = require("obsidian");
-var SymptomModal = class extends import_obsidian6.Modal {
+var import_obsidian7 = require("obsidian");
+var SymptomModal = class extends ArfidModal {
   constructor(app, plugin) {
-    super(app);
+    super(app, plugin, "Log symptoms");
     this.symptoms = /* @__PURE__ */ new Set();
     this.notes = "";
-    this.plugin = plugin;
   }
-  onOpen() {
+  buildContent() {
     const { contentEl } = this;
-    contentEl.addClass("arfid-plugin", "arfid-quicklog");
-    this.titleEl.setText("Log symptoms");
     contentEl.createDiv({
       cls: "arfid-hint",
       text: "Body signals worth tracking \u2014 they often connect back to how eating has gone."
@@ -1222,86 +1268,45 @@ var SymptomModal = class extends import_obsidian6.Modal {
       attr: { rows: "2", placeholder: "Anything else \u2014 when it started, what you'd eaten so far today\u2026" }
     });
     notes.addEventListener("input", () => this.notes = notes.value);
-    const save = contentEl.createEl("button", { cls: "arfid-save-btn", text: "Save symptoms" });
-    save.addEventListener("click", () => void this.save());
-    this.scope.register(["Mod"], "Enter", () => {
-      void this.save();
-      return false;
-    });
+    this.addSaveButton("Save symptoms", () => this.save());
   }
   async save() {
     if (this.symptoms.size === 0) {
-      new import_obsidian6.Notice("Pick at least one symptom.");
+      new import_obsidian7.Notice("Pick at least one symptom.");
       return;
     }
-    const now = /* @__PURE__ */ new Date();
-    const date = isoDate(now);
-    const time = isoTime(now);
+    const { date, time } = nowStamp();
     const symptoms = [...this.symptoms];
-    const note = buildSymptomNote(date, time, symptoms, this.notes);
-    const file = await createEntryFile(this.app, this.plugin, date, time, "symptoms", note);
     await this.plugin.saveSettings();
-    if (this.plugin.settings.dailyNoteLinking) {
-      try {
-        await linkIntoDailyNote(this.app, this.plugin.settings, date, time, file.basename, `symptoms: ${symptoms.join(", ")}`);
-      } catch (e) {
-        console.error("ARFID Tracker: daily note linking failed", e);
-      }
-    }
-    new import_obsidian6.Notice("Symptoms logged.");
+    await saveEntryNote(this.plugin, date, time, "symptoms", buildSymptomNote(date, time, symptoms, this.notes), {
+      dailyLabel: `symptoms: ${symptoms.join(", ")}`,
+      notice: "Symptoms logged."
+    });
     this.close();
-    this.plugin.notifyDataChanged();
-  }
-  onClose() {
-    this.contentEl.empty();
   }
 };
 
 // src/foodnote.ts
-var import_obsidian7 = require("obsidian");
-var FoodNoteModal = class extends import_obsidian7.Modal {
+var import_obsidian8 = require("obsidian");
+var FoodNoteModal = class extends ArfidModal {
   constructor(app, plugin, prefillFood, prefillKind) {
-    super(app);
+    super(app, plugin, "Add a ritual, order, or recipe");
     this.foods = [];
     this.foodName = "";
     this.kind = "ritual";
     this.body = "";
-    this.plugin = plugin;
     if (prefillFood) this.foodName = prefillFood;
     if (prefillKind) this.kind = prefillKind;
   }
-  onOpen() {
+  buildContent() {
     this.foods = this.plugin.store.getFoods();
     const { contentEl } = this;
-    contentEl.addClass("arfid-plugin", "arfid-quicklog");
-    this.titleEl.setText("Add a ritual, order, or recipe");
     contentEl.createDiv({ cls: "arfid-field-label", text: "Food" });
-    const foodInput = contentEl.createEl("input", {
-      cls: "arfid-input",
-      attr: { type: "text", placeholder: "Which food is this about?" }
+    buildFoodPicker(contentEl, this.foods, {
+      placeholder: "Which food is this about?",
+      initial: this.foodName,
+      onChange: (name) => this.foodName = name
     });
-    foodInput.value = this.foodName;
-    const suggestions = contentEl.createDiv({ cls: "arfid-suggestions" });
-    const renderSuggestions = () => {
-      suggestions.empty();
-      const q = normalizeFoodKey(foodInput.value);
-      const matches = this.foods.filter((f) => (!q || f.key.includes(q)) && f.key !== q).slice(0, 6);
-      for (const f of matches) {
-        const chip = suggestions.createEl("button", { cls: "arfid-chip arfid-suggestion" });
-        chip.createSpan({ cls: `arfid-status-dot arfid-status-${f.currentStatus}` });
-        chip.createSpan({ text: f.name });
-        chip.addEventListener("click", () => {
-          foodInput.value = f.name;
-          this.foodName = f.name;
-          renderSuggestions();
-        });
-      }
-    };
-    foodInput.addEventListener("input", () => {
-      this.foodName = foodInput.value;
-      renderSuggestions();
-    });
-    renderSuggestions();
     contentEl.createDiv({ cls: "arfid-field-label", text: "Kind" });
     buildChoiceRow(
       contentEl,
@@ -1320,104 +1325,54 @@ var FoodNoteModal = class extends import_obsidian7.Modal {
       }
     });
     body.addEventListener("input", () => this.body = body.value);
-    const save = contentEl.createEl("button", { cls: "arfid-save-btn", text: "Save note" });
-    save.addEventListener("click", () => void this.save());
+    this.addSaveButton("Save note", () => this.save());
   }
   async save() {
     const food = this.foodName.trim();
     if (!food) {
-      new import_obsidian7.Notice("Add a food name first.");
+      new import_obsidian8.Notice("Add a food name first.");
       return;
     }
     if (!this.body.trim()) {
-      new import_obsidian7.Notice("Write the details first \u2014 that's the part future you needs.");
+      new import_obsidian8.Notice("Write the details first \u2014 that's the part future you needs.");
       return;
     }
-    const date = isoDate(/* @__PURE__ */ new Date());
-    const content = buildFoodNote(date, food, this.kind, this.body);
-    const folder = this.plugin.settings.entriesFolder.trim().replace(/\/+$/, "");
-    if (folder && !(this.app.vault.getAbstractFileByPath((0, import_obsidian7.normalizePath)(folder)) instanceof import_obsidian7.TFolder)) {
-      await this.app.vault.createFolder((0, import_obsidian7.normalizePath)(folder)).catch(() => {
-      });
-    }
+    const { date } = nowStamp();
     const base = sanitizeForFilename(`${food} \u2014 ${NOTE_KIND_LABELS[this.kind].toLowerCase()}`);
-    let path = (0, import_obsidian7.normalizePath)((folder ? folder + "/" : "") + base + ".md");
-    let n = 1;
-    while (this.app.vault.getAbstractFileByPath(path)) {
-      path = (0, import_obsidian7.normalizePath)((folder ? folder + "/" : "") + `${base} ${++n}.md`);
-    }
-    await this.app.vault.create(path, content);
-    new import_obsidian7.Notice(`Saved ${NOTE_KIND_LABELS[this.kind].toLowerCase()} for ${food}.`);
+    await createUniqueNote(this.app, this.plugin.settings.entriesFolder, base, buildFoodNote(date, food, this.kind, this.body));
+    new import_obsidian8.Notice(`Saved ${NOTE_KIND_LABELS[this.kind].toLowerCase()} for ${food}.`);
     this.close();
     this.plugin.notifyDataChanged();
-  }
-  onClose() {
-    this.contentEl.empty();
   }
 };
 
 // src/statuschange.ts
-var import_obsidian8 = require("obsidian");
-var StatusChangeModal = class extends import_obsidian8.Modal {
+var import_obsidian9 = require("obsidian");
+var StatusChangeModal = class extends ArfidModal {
   constructor(app, plugin, prefillFood) {
-    super(app);
+    super(app, plugin, "Change a food's status");
     this.foods = [];
     this.foodName = "";
     this.status = "";
     this.reason = "";
-    this.statusSetter = null;
-    this.plugin = plugin;
     if (prefillFood) this.foodName = prefillFood;
   }
-  onOpen() {
+  buildContent() {
     this.foods = this.plugin.store.getFoods();
     const { contentEl } = this;
-    contentEl.addClass("arfid-plugin", "arfid-quicklog");
-    this.titleEl.setText("Change a food's status");
     contentEl.createDiv({ cls: "arfid-field-label", text: "Food" });
-    const foodInput = contentEl.createEl("input", {
-      cls: "arfid-input",
-      attr: { type: "text", placeholder: "Which food?" }
-    });
-    foodInput.value = this.foodName;
-    const suggestions = contentEl.createDiv({ cls: "arfid-suggestions" });
-    this.currentLine = contentEl.createDiv({ cls: "arfid-hint" });
-    const updateCurrent = () => {
-      const known = this.known();
-      this.currentLine.setText(
-        known ? `Currently: ${STATUS_LABELS[known.currentStatus]} (since ${known.lastLogged})` : ""
-      );
-    };
-    const renderSuggestions = () => {
-      suggestions.empty();
-      const q = normalizeFoodKey(foodInput.value);
-      const matches = this.foods.filter((f) => (!q || f.key.includes(q)) && f.key !== q).slice(0, 6);
-      for (const f of matches) {
-        const chip = suggestions.createEl("button", { cls: "arfid-chip arfid-suggestion" });
-        chip.createSpan({ cls: `arfid-status-dot arfid-status-${f.currentStatus}` });
-        chip.createSpan({ text: f.name });
-        chip.addEventListener("click", () => {
-          foodInput.value = f.name;
-          this.foodName = f.name;
-          renderSuggestions();
-          updateCurrent();
-        });
+    buildFoodPicker(contentEl, this.foods, {
+      placeholder: "Which food?",
+      initial: this.foodName,
+      onChange: (name) => {
+        this.foodName = name;
+        this.updateCurrent();
       }
-    };
-    foodInput.addEventListener("input", () => {
-      this.foodName = foodInput.value;
-      renderSuggestions();
-      updateCurrent();
     });
-    renderSuggestions();
-    updateCurrent();
+    this.currentLine = contentEl.createDiv({ cls: "arfid-hint" });
+    this.updateCurrent();
     contentEl.createDiv({ cls: "arfid-field-label", text: "New status" });
-    this.statusSetter = buildChoiceRow(
-      contentEl,
-      FOOD_STATUSES.map((s) => ({ value: s, label: STATUS_LABELS[s], dotClass: `arfid-status-${s}` })),
-      "",
-      (v) => this.status = v
-    );
+    buildStatusRow(contentEl, "", (v) => this.status = v);
     contentEl.createDiv({ cls: "arfid-field-label", text: "What changed?" });
     const reason = contentEl.createEl("textarea", {
       cls: "arfid-textarea",
@@ -1427,30 +1382,30 @@ var StatusChangeModal = class extends import_obsidian8.Modal {
       }
     });
     reason.addEventListener("input", () => this.reason = reason.value);
-    const save = contentEl.createEl("button", { cls: "arfid-save-btn", text: "Save status change" });
-    save.addEventListener("click", () => void this.save());
+    this.addSaveButton("Save status change", () => this.save());
   }
-  known() {
-    return this.foods.find((f) => f.key === normalizeFoodKey(this.foodName));
+  updateCurrent() {
+    const known = findFood(this.foods, this.foodName);
+    this.currentLine.setText(
+      known ? `Currently: ${STATUS_LABELS[known.currentStatus]} (since ${known.lastLogged})` : ""
+    );
   }
   async save() {
     const food = this.foodName.trim();
     if (!food) {
-      new import_obsidian8.Notice("Add a food name first.");
+      new import_obsidian9.Notice("Add a food name first.");
       return;
     }
     if (!this.status) {
-      new import_obsidian8.Notice("Pick the new status.");
+      new import_obsidian9.Notice("Pick the new status.");
       return;
     }
-    const known = this.known();
+    const known = findFood(this.foods, food);
     if (known && known.currentStatus === this.status) {
-      new import_obsidian8.Notice(`${food} is already marked ${STATUS_LABELS[this.status].toLowerCase()}.`);
+      new import_obsidian9.Notice(`${food} is already marked ${STATUS_LABELS[this.status].toLowerCase()}.`);
       return;
     }
-    const now = /* @__PURE__ */ new Date();
-    const date = isoDate(now);
-    const time = isoTime(now);
+    const { date, time } = nowStamp();
     const note = buildEntryNote({
       date,
       time,
@@ -1467,28 +1422,18 @@ var StatusChangeModal = class extends import_obsidian8.Modal {
       strategyWorked: "n/a",
       tags: ["status-change"]
     });
-    const file = await createEntryFile(this.app, this.plugin, date, time, food, note);
-    if (this.plugin.settings.dailyNoteLinking) {
-      const fromLabel = known ? `${STATUS_LABELS[known.currentStatus].toLowerCase()} \u2192 ` : "";
-      const label = `status: ${food} \u2014 ${fromLabel}${STATUS_LABELS[this.status].toLowerCase()}`;
-      try {
-        await linkIntoDailyNote(this.app, this.plugin.settings, date, time, file.basename, label);
-      } catch (e) {
-        console.error("ARFID Tracker: daily note linking failed", e);
-      }
-    }
-    new import_obsidian8.Notice(`${food} \u2192 ${STATUS_LABELS[this.status].toLowerCase()}`);
+    const fromLabel = known ? `${STATUS_LABELS[known.currentStatus].toLowerCase()} \u2192 ` : "";
+    await saveEntryNote(this.plugin, date, time, food, note, {
+      dailyLabel: `status: ${food} \u2014 ${fromLabel}${STATUS_LABELS[this.status].toLowerCase()}`,
+      notice: `${food} \u2192 ${STATUS_LABELS[this.status].toLowerCase()}`
+    });
     this.close();
-    this.plugin.notifyDataChanged();
-  }
-  onClose() {
-    this.contentEl.empty();
   }
 };
 
 // src/addfoods.ts
-var import_obsidian9 = require("obsidian");
-async function createBaselineEntry(app, plugin, date, time, food, status) {
+var import_obsidian10 = require("obsidian");
+async function createBaselineEntry(plugin, date, time, food, status, notice) {
   const note = buildEntryNote({
     date,
     time,
@@ -1505,47 +1450,41 @@ async function createBaselineEntry(app, plugin, date, time, food, status) {
     strategyWorked: "n/a",
     tags: ["baseline"]
   });
-  await createEntryFile(app, plugin, date, time, food, note);
+  await saveEntryNote(plugin, date, time, food, note, { notice });
 }
-var AddFoodModal = class extends import_obsidian9.Modal {
+var AddFoodModal = class extends ArfidModal {
   constructor(app, plugin) {
-    super(app);
-    this.foods = [];
+    super(app, plugin, "Add a food to your library");
     this.foodName = "";
     this.status = "";
-    this.plugin = plugin;
   }
-  onOpen() {
-    this.foods = this.plugin.store.getFoods();
+  buildContent() {
+    const foods = this.plugin.store.getFoods();
     const { contentEl } = this;
-    contentEl.addClass("arfid-plugin", "arfid-quicklog");
-    this.titleEl.setText("Add a food to your library");
     contentEl.createDiv({
       cls: "arfid-hint",
       text: "Nothing is logged as eaten \u2014 this just adds the food with a status."
     });
-    const foodInput = contentEl.createEl("input", {
-      cls: "arfid-input",
-      attr: { type: "text", placeholder: "Food name", enterkeyhint: "done" }
+    const { input: foodInput } = buildFoodPicker(contentEl, foods, {
+      placeholder: "Food name",
+      onChange: (name) => {
+        this.foodName = name;
+        const known = findFood(foods, name);
+        if (known) {
+          this.hintEl.setText(
+            `${known.name} is already tracked as ${STATUS_LABELS[known.currentStatus].toLowerCase()} \u2014 saving will open the status change screen instead.`
+          );
+          this.saveBtn.setText("Change its status\u2026");
+        } else {
+          this.hintEl.setText("");
+          this.saveBtn.setText("Add food");
+        }
+      }
     });
     this.hintEl = contentEl.createDiv({ cls: "arfid-hint" });
-    foodInput.addEventListener("input", () => {
-      this.foodName = foodInput.value;
-      this.updateExistingHint();
-    });
     contentEl.createDiv({ cls: "arfid-field-label", text: "Status" });
-    buildChoiceRow(
-      contentEl,
-      FOOD_STATUSES.map((s) => ({ value: s, label: STATUS_LABELS[s], dotClass: `arfid-status-${s}` })),
-      "",
-      (v) => this.status = v
-    );
-    this.saveBtn = contentEl.createEl("button", { cls: "arfid-save-btn", text: "Add food" });
-    this.saveBtn.addEventListener("click", () => void this.save());
-    this.scope.register(["Mod"], "Enter", () => {
-      void this.save();
-      return false;
-    });
+    buildStatusRow(contentEl, "", (v) => this.status = v);
+    this.saveBtn = this.addSaveButton("Add food", () => this.save());
     const bulkLink = contentEl.createEl("button", {
       cls: "arfid-details-toggle",
       text: "Add many at once instead"
@@ -1556,57 +1495,34 @@ var AddFoodModal = class extends import_obsidian9.Modal {
     });
     window.setTimeout(() => foodInput.focus(), 50);
   }
-  known() {
-    return this.foods.find((f) => f.key === normalizeFoodKey(this.foodName));
-  }
-  updateExistingHint() {
-    const known = this.known();
-    if (known) {
-      this.hintEl.setText(
-        `${known.name} is already tracked as ${STATUS_LABELS[known.currentStatus].toLowerCase()} \u2014 saving will open the status change screen instead.`
-      );
-      this.saveBtn.setText("Change its status\u2026");
-    } else {
-      this.hintEl.setText("");
-      this.saveBtn.setText("Add food");
-    }
-  }
   async save() {
     const food = this.foodName.trim();
     if (!food) {
-      new import_obsidian9.Notice("Add a food name first.");
+      new import_obsidian10.Notice("Add a food name first.");
       return;
     }
-    const known = this.known();
+    const known = findFood(this.plugin.store.getFoods(), food);
     if (known) {
       this.close();
       new StatusChangeModal(this.app, this.plugin, known.name).open();
       return;
     }
     if (!this.status) {
-      new import_obsidian9.Notice("Pick a status for it.");
+      new import_obsidian10.Notice("Pick a status for it.");
       return;
     }
-    const now = /* @__PURE__ */ new Date();
-    await createBaselineEntry(this.app, this.plugin, isoDate(now), isoTime(now), food, this.status);
-    new import_obsidian9.Notice(`Added ${food} as ${STATUS_LABELS[this.status].toLowerCase()}.`);
+    const { date, time } = nowStamp();
+    await createBaselineEntry(this.plugin, date, time, food, this.status, `Added ${food} as ${STATUS_LABELS[this.status].toLowerCase()}.`);
     this.close();
-    this.plugin.notifyDataChanged();
-  }
-  onClose() {
-    this.contentEl.empty();
   }
 };
-var AddFoodsModal = class extends import_obsidian9.Modal {
+var AddFoodsModal = class extends ArfidModal {
   constructor(app, plugin) {
-    super(app);
+    super(app, plugin, "Add foods to your library");
     this.inputs = /* @__PURE__ */ new Map();
-    this.plugin = plugin;
   }
-  onOpen() {
+  buildContent() {
     const { contentEl } = this;
-    contentEl.addClass("arfid-plugin", "arfid-quicklog");
-    this.titleEl.setText("Add foods to your library");
     contentEl.createDiv({
       cls: "arfid-hint",
       text: "Enter the foods you already know, one per line (commas work too). Nothing here is logged as eaten \u2014 it just puts your existing lists into the system."
@@ -1621,22 +1537,18 @@ var AddFoodsModal = class extends import_obsidian9.Modal {
       });
       this.inputs.set(status, ta);
     }
-    const save = contentEl.createEl("button", { cls: "arfid-save-btn", text: "Add foods" });
-    save.addEventListener("click", () => void this.save());
+    this.addSaveButton("Add foods", () => this.save());
   }
   async save() {
     var _a, _b;
     const knownKeys = new Set(this.plugin.store.getFoods().map((f) => f.key));
-    const now = /* @__PURE__ */ new Date();
-    const date = isoDate(now);
-    const time = isoTime(now);
+    const { date, time } = nowStamp();
     let added = 0;
     const skipped = [];
     const seen = /* @__PURE__ */ new Set();
     for (const status of FOOD_STATUSES) {
       const raw = (_b = (_a = this.inputs.get(status)) == null ? void 0 : _a.value) != null ? _b : "";
-      const foods = raw.split(/[\n,]/).map((s) => s.trim()).filter((s) => s.length > 0);
-      for (const food of foods) {
+      for (const food of splitList(raw.replace(/\n/g, ","))) {
         const key = normalizeFoodKey(food);
         if (seen.has(key)) continue;
         seen.add(key);
@@ -1644,24 +1556,20 @@ var AddFoodsModal = class extends import_obsidian9.Modal {
           skipped.push(food);
           continue;
         }
-        await createBaselineEntry(this.app, this.plugin, date, time, food, status);
+        await createBaselineEntry(this.plugin, date, time, food, status);
         added++;
       }
     }
     if (added === 0 && skipped.length === 0) {
-      new import_obsidian9.Notice("Nothing to add \u2014 enter some foods first.");
+      new import_obsidian10.Notice("Nothing to add \u2014 enter some foods first.");
       return;
     }
     let msg = `Added ${added} food${added === 1 ? "" : "s"} to your library.`;
     if (skipped.length > 0) {
       msg += ` Already tracked (unchanged): ${skipped.join(", ")} \u2014 use \u201CChange a food's status\u201D to move them.`;
     }
-    new import_obsidian9.Notice(msg, skipped.length > 0 ? 8e3 : 4e3);
+    new import_obsidian10.Notice(msg, skipped.length > 0 ? 8e3 : 4e3);
     this.close();
-    this.plugin.notifyDataChanged();
-  }
-  onClose() {
-    this.contentEl.empty();
   }
 };
 function placeholderFor(status) {
@@ -1678,7 +1586,7 @@ function placeholderFor(status) {
 }
 
 // src/dashboard.ts
-var import_obsidian11 = require("obsidian");
+var import_obsidian12 = require("obsidian");
 
 // src/charts.ts
 var SVG_NS = "http://www.w3.org/2000/svg";
@@ -1688,7 +1596,6 @@ function svgEl(tag, attrs) {
   return el;
 }
 function renderLineChart(parent, points, unit) {
-  const unitLabel = unit.plural;
   const wrap = parent.createDiv({ cls: "arfid-chart-wrap" });
   if (points.length === 0) {
     wrap.createDiv({ cls: "arfid-empty", text: "No entries yet." });
@@ -1708,7 +1615,7 @@ function renderLineChart(parent, points, unit) {
     class: "arfid-linechart",
     role: "img"
   });
-  svg.setAttr("aria-label", `${unitLabel} over time`);
+  svg.setAttr("aria-label", `${unit.plural} over time`);
   for (const v of [0, top / 2, top]) {
     const gy = y(v);
     svg.appendChild(
@@ -1790,7 +1697,7 @@ function renderBars(parent, rows, emptyText) {
 }
 
 // src/export.ts
-var import_obsidian10 = require("obsidian");
+var import_obsidian11 = require("obsidian");
 function csvCell(value) {
   if (/[",\n]/.test(value)) return '"' + value.replace(/"/g, '""') + '"';
   return value;
@@ -1892,11 +1799,11 @@ function buildMarkdownSummary(store) {
   lines.push("");
   lines.push(`## Exposure practice`);
   lines.push("");
-  const exposures = entries.filter((e) => e.exposure);
+  const exposures = entries.filter((e) => e.kind === "exposure");
   if (exposures.length === 0) {
     lines.push("No exposures logged yet.");
   } else {
-    const cutoff30 = isoDate(new Date(Date.now() - 30 * 864e5));
+    const cutoff30 = daysAgoIso(30);
     lines.push(`${exposures.length} exposures logged, ${exposures.filter((e) => e.date >= cutoff30).length} in the last 30 days.`);
     lines.push("");
     lines.push(`| Step reached | Count |`);
@@ -1989,7 +1896,7 @@ function buildMarkdownSummary(store) {
     lines.push(`| Date | Time | Food | Kind | Status | Outcome | Strategies | Context |`);
     lines.push(`| --- | --- | --- | --- | --- | --- | --- | --- |`);
     for (const e of entries) {
-      const kind = e.exposure ? `exposure${e.exposureStep ? ` (${EXPOSURE_STEP_LABELS[e.exposureStep].toLowerCase()})` : ""}` : e.tags.includes("status-change") ? "status change" : e.tags.includes("baseline") ? "baseline" : e.meal || "\u2014";
+      const kind = e.kind === "exposure" ? `exposure${e.exposureStep ? ` (${EXPOSURE_STEP_LABELS[e.exposureStep].toLowerCase()})` : ""}` : e.kind === "status-change" ? "status change" : e.kind === "baseline" ? "baseline" : e.meal || "\u2014";
       lines.push(
         `| ${e.date} | ${e.time} | ${e.food} | ${kind} | ${STATUS_LABELS[e.status]} | ${e.outcome || "\u2014"} | ${e.strategies.join(", ") || "\u2014"} | ${e.context.join(", ") || "\u2014"} |`
       );
@@ -1999,14 +1906,11 @@ function buildMarkdownSummary(store) {
   return lines.join("\n");
 }
 async function writeExport(app, settings, filename, content) {
-  const folder = settings.exportsFolder.trim().replace(/\/+$/, "");
-  if (folder && !(app.vault.getAbstractFileByPath((0, import_obsidian10.normalizePath)(folder)) instanceof import_obsidian10.TFolder)) {
-    await app.vault.createFolder((0, import_obsidian10.normalizePath)(folder)).catch(() => {
-    });
-  }
-  const path = (0, import_obsidian10.normalizePath)((folder ? folder + "/" : "") + filename);
+  const folder = normalizeFolder(settings.exportsFolder);
+  await ensureFolder(app, folder);
+  const path = (0, import_obsidian11.normalizePath)((folder ? folder + "/" : "") + filename);
   const existing = app.vault.getAbstractFileByPath(path);
-  if (existing instanceof import_obsidian10.TFile) {
+  if (existing instanceof import_obsidian11.TFile) {
     await app.vault.modify(existing, content);
     return existing;
   }
@@ -2020,19 +1924,19 @@ async function exportCsv(app, settings, store) {
   if (symptoms.length > 0) {
     await writeExport(app, settings, `arfid-symptoms-${isoDate(/* @__PURE__ */ new Date())}.csv`, buildSymptomCsv(symptoms));
   }
-  new import_obsidian10.Notice(
+  new import_obsidian11.Notice(
     `Exported ${entries.length} entries${symptoms.length > 0 ? ` and ${symptoms.length} symptom logs` : ""} to ${(_b = (_a = file.parent) == null ? void 0 : _a.path) != null ? _b : file.path}`
   );
 }
 async function exportSummary(app, settings, store) {
   const file = await writeExport(app, settings, `arfid-summary-${isoDate(/* @__PURE__ */ new Date())}.md`, buildMarkdownSummary(store));
-  new import_obsidian10.Notice(`Summary written to ${file.path}`);
+  new import_obsidian11.Notice(`Summary written to ${file.path}`);
   await app.workspace.getLeaf(true).openFile(file);
 }
 
 // src/dashboard.ts
 var VIEW_TYPE_ARFID = "arfid-dashboard";
-var ArfidDashboardView = class extends import_obsidian11.ItemView {
+var ArfidDashboardView = class extends import_obsidian12.ItemView {
   constructor(leaf, plugin) {
     super(leaf);
     this.tab = "overview";
@@ -2084,10 +1988,9 @@ var ArfidDashboardView = class extends import_obsidian11.ItemView {
   // ------------------------------------------------------------- overview
   renderOverview(body, entries, foods) {
     const shifts = this.plugin.store.getStatusShifts(foods);
-    const cutoff30 = isoDate(new Date(Date.now() - 30 * 864e5));
-    const expansionShift = (s) => s.from === "fear" && (s.to === "trying" || s.to === "safe" || s.to === "recently-expanded") || s.from === "trying" && (s.to === "safe" || s.to === "recently-expanded") || s.to === "recently-expanded";
-    const recentExpansions = shifts.filter((s) => s.date >= cutoff30 && expansionShift(s)).length;
-    const recentExposures = entries.filter((e) => e.exposure && e.date >= cutoff30).length;
+    const cutoff30 = daysAgoIso(30);
+    const recentExpansions = shifts.filter((s) => s.date >= cutoff30 && isExpansionShift(s)).length;
+    const recentExposures = entries.filter((e) => e.kind === "exposure" && e.date >= cutoff30).length;
     const actions = body.createDiv({ cls: "arfid-quick-actions" });
     const struggling = actions.createEl("button", { cls: "arfid-chip arfid-action-chip", text: "I'm struggling" });
     struggling.addEventListener("click", () => new StrugglingModal(this.app, this.plugin).open());
@@ -2102,9 +2005,12 @@ var ArfidDashboardView = class extends import_obsidian11.ItemView {
       if (statusClass) v.addClass(statusClass);
       c.createDiv({ cls: "arfid-card-label", text: label });
     };
-    card("Safe foods", foods.filter((f) => f.currentStatus === "safe").length, "arfid-text-safe");
-    card("Trying", foods.filter((f) => f.currentStatus === "trying").length, "arfid-text-trying");
-    card("Fear foods", foods.filter((f) => f.currentStatus === "fear").length, "arfid-text-fear");
+    const statusCounts = {};
+    for (const s of FOOD_STATUSES) statusCounts[s] = 0;
+    for (const f of foods) statusCounts[f.currentStatus]++;
+    card("Safe foods", statusCounts.safe, "arfid-text-safe");
+    card("Trying", statusCounts.trying, "arfid-text-trying");
+    card("Fear foods", statusCounts.fear, "arfid-text-fear");
     card("Expansions \xB7 30d", recentExpansions, "arfid-text-expanded");
     card("Exposures \xB7 30d", recentExposures);
     const trendSection = body.createDiv({ cls: "arfid-section" });
@@ -2122,7 +2028,7 @@ var ArfidDashboardView = class extends import_obsidian11.ItemView {
         this.render();
       });
     }
-    const consumed = entries.filter((e) => e.meal || e.outcome || e.exposure);
+    const consumed = entries.filter(isConsumed);
     renderLineChart(
       trendSection,
       this.trendMode === "day" ? trendPerDay(consumed, 30) : trendPerWeek(consumed, 12),
@@ -2151,7 +2057,7 @@ var ArfidDashboardView = class extends import_obsidian11.ItemView {
     }
     const recentSection = body.createDiv({ cls: "arfid-section" });
     recentSection.createEl("h3", { text: "Recently logged" });
-    const recent = [...entries].reverse().filter((e) => !e.tags.includes("baseline")).slice(0, 10);
+    const recent = [...entries].reverse().filter((e) => e.kind !== "baseline").slice(0, 10);
     if (recent.length === 0) {
       recentSection.createDiv({ cls: "arfid-empty", text: "Nothing logged yet. Tap \u201C+ Log food\u201D to add your first entry." });
     } else {
@@ -2168,13 +2074,7 @@ var ArfidDashboardView = class extends import_obsidian11.ItemView {
   }
   // ---------------------------------------------------------------- foods
   renderFoods(body, foods) {
-    var _a;
-    const notesByFood = /* @__PURE__ */ new Map();
-    for (const n of this.plugin.store.getFoodNotes()) {
-      const list = (_a = notesByFood.get(n.key)) != null ? _a : [];
-      list.push(n);
-      notesByFood.set(n.key, list);
-    }
+    const notesByFood = this.plugin.store.getFoodNotesByKey();
     const topRow = body.createDiv({ cls: "arfid-foods-toolbar" });
     const search = topRow.createEl("input", {
       cls: "arfid-input arfid-search",
@@ -2189,7 +2089,7 @@ var ArfidDashboardView = class extends import_obsidian11.ItemView {
       renderGroups();
     });
     const renderGroups = () => {
-      var _a2;
+      var _a;
       groups.empty();
       const q = this.foodSearch.trim().toLowerCase();
       const filtered = q ? foods.filter((f) => f.key.includes(q)) : foods;
@@ -2208,7 +2108,7 @@ var ArfidDashboardView = class extends import_obsidian11.ItemView {
           const row = section.createDiv({ cls: "arfid-food-row" });
           const main = row.createDiv({ cls: "arfid-food-main" });
           main.createSpan({ cls: "arfid-food-name", text: f.name });
-          const notes = (_a2 = notesByFood.get(f.key)) != null ? _a2 : [];
+          const notes = (_a = notesByFood.get(f.key)) != null ? _a : [];
           if (notes.length > 0) {
             const badges = main.createSpan({ cls: "arfid-note-badges" });
             for (const kind of NOTE_KINDS) {
@@ -2287,7 +2187,7 @@ var ArfidDashboardView = class extends import_obsidian11.ItemView {
     const main = row.createSpan({ cls: "arfid-entry-main" });
     main.createSpan({ cls: `arfid-status-dot arfid-status-${e.status}` });
     main.createSpan({ text: showFood ? e.food : STATUS_LABELS[e.status] });
-    if (e.exposure) {
+    if (e.kind === "exposure") {
       const step = e.exposureStep ? EXPOSURE_STEP_LABELS[e.exposureStep].toLowerCase() : "";
       row.createSpan({ cls: "arfid-entry-outcome", text: step ? `exposure \xB7 ${step}` : "exposure" });
     } else {
@@ -2313,23 +2213,32 @@ function trendPerDay(entries, days) {
   return points;
 }
 function trendPerWeek(entries, weeks) {
-  const points = [];
+  var _a;
   const now = /* @__PURE__ */ new Date();
   const day = (now.getDay() + 6) % 7;
   const thisWeekStart = new Date(now.getFullYear(), now.getMonth(), now.getDate() - day);
+  const starts = [];
   for (let i = weeks - 1; i >= 0; i--) {
-    const start = new Date(thisWeekStart.getTime() - i * 7 * 864e5);
-    const end = new Date(start.getTime() + 7 * 864e5);
-    const startKey = isoDate(start);
-    const endKey = isoDate(end);
-    const count = entries.filter((e) => e.date >= startKey && e.date < endKey).length;
-    points.push({ label: startKey.slice(5), value: count });
+    starts.push(isoDate(new Date(thisWeekStart.getTime() - i * 7 * 864e5)));
   }
-  return points;
+  const counts = /* @__PURE__ */ new Map();
+  for (const e of entries) {
+    if (e.date < starts[0]) continue;
+    let bucket = starts[0];
+    for (const s of starts) {
+      if (s <= e.date) bucket = s;
+      else break;
+    }
+    counts.set(bucket, ((_a = counts.get(bucket)) != null ? _a : 0) + 1);
+  }
+  return starts.map((s) => {
+    var _a2;
+    return { label: s.slice(5), value: (_a2 = counts.get(s)) != null ? _a2 : 0 };
+  });
 }
 
 // src/main.ts
-var ArfidTrackerPlugin = class extends import_obsidian12.Plugin {
+var ArfidTrackerPlugin = class extends import_obsidian13.Plugin {
   constructor() {
     super(...arguments);
     this.settings = DEFAULT_SETTINGS;
@@ -2403,8 +2312,8 @@ var ArfidTrackerPlugin = class extends import_obsidian12.Plugin {
     });
     this.addSettingTab(new ArfidSettingTab(this.app, this));
     this.registerEvent(this.app.metadataCache.on("changed", (file) => this.maybeRefresh(file.path)));
-    this.registerEvent(this.app.vault.on("delete", () => this.scheduleRefresh()));
-    this.registerEvent(this.app.vault.on("rename", () => this.scheduleRefresh()));
+    this.registerEvent(this.app.vault.on("delete", () => this.notifyDataChanged()));
+    this.registerEvent(this.app.vault.on("rename", () => this.notifyDataChanged()));
   }
   openQuickLog() {
     new QuickLogModal(this.app, this).open();
@@ -2420,17 +2329,9 @@ var ArfidTrackerPlugin = class extends import_obsidian12.Plugin {
     }
     this.app.workspace.revealLeaf(leaf);
   }
+  /** Invalidate the store's index and re-render open dashboards (debounced). */
   notifyDataChanged() {
-    this.scheduleRefresh();
-  }
-  maybeRefresh(path) {
-    var _a;
-    const fm = (_a = this.app.metadataCache.getCache(path)) == null ? void 0 : _a.frontmatter;
-    if ((fm == null ? void 0 : fm.type) === "food-entry" || (fm == null ? void 0 : fm.type) === "symptom-entry" || (fm == null ? void 0 : fm.type) === "food-note") {
-      this.scheduleRefresh();
-    }
-  }
-  scheduleRefresh() {
+    this.store.invalidate();
     if (this.refreshTimer !== null) window.clearTimeout(this.refreshTimer);
     this.refreshTimer = window.setTimeout(() => {
       this.refreshTimer = null;
@@ -2439,6 +2340,12 @@ var ArfidTrackerPlugin = class extends import_obsidian12.Plugin {
         if (view instanceof ArfidDashboardView) view.render();
       }
     }, 400);
+  }
+  maybeRefresh(path) {
+    var _a;
+    const fm = (_a = this.app.metadataCache.getCache(path)) == null ? void 0 : _a.frontmatter;
+    const relevant = (fm == null ? void 0 : fm.type) === "food-entry" || (fm == null ? void 0 : fm.type) === "symptom-entry" || (fm == null ? void 0 : fm.type) === "food-note";
+    if (relevant || this.store.contains(path)) this.notifyDataChanged();
   }
   async loadSettings() {
     this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());

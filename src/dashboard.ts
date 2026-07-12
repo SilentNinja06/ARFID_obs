@@ -1,19 +1,19 @@
 import { ItemView, WorkspaceLeaf } from "obsidian";
 import {
 	EXPOSURE_STEP_LABELS,
-	ExposureStep,
 	FOOD_STATUSES,
 	FoodEntry,
-	FoodNote,
+	FoodStatus,
 	FoodSummary,
 	NOTE_KIND_LABELS,
 	NOTE_KINDS,
 	STATUS_LABELS,
-	StatusShift,
+	isConsumed,
+	isExpansionShift,
 } from "./types";
 import { renderBars, renderLineChart, SeriesPoint } from "./charts";
 import { exportCsv, exportSummary } from "./export";
-import { isoDate } from "./store";
+import { daysAgoIso, isoDate } from "./store";
 import { QuickLogModal } from "./quicklog";
 import { ExposureModal } from "./exposure";
 import { StrugglingModal } from "./struggling";
@@ -91,13 +91,9 @@ export class ArfidDashboardView extends ItemView {
 
 	private renderOverview(body: HTMLElement, entries: FoodEntry[], foods: FoodSummary[]): void {
 		const shifts = this.plugin.store.getStatusShifts(foods);
-		const cutoff30 = isoDate(new Date(Date.now() - 30 * 86400_000));
-		const expansionShift = (s: StatusShift) =>
-			(s.from === "fear" && (s.to === "trying" || s.to === "safe" || s.to === "recently-expanded")) ||
-			(s.from === "trying" && (s.to === "safe" || s.to === "recently-expanded")) ||
-			s.to === "recently-expanded";
-		const recentExpansions = shifts.filter((s) => s.date >= cutoff30 && expansionShift(s)).length;
-		const recentExposures = entries.filter((e) => e.exposure && e.date >= cutoff30).length;
+		const cutoff30 = daysAgoIso(30);
+		const recentExpansions = shifts.filter((s) => s.date >= cutoff30 && isExpansionShift(s)).length;
+		const recentExposures = entries.filter((e) => e.kind === "exposure" && e.date >= cutoff30).length;
 
 		// quick actions for hard moments — reachable in two taps from anywhere
 		const actions = body.createDiv({ cls: "arfid-quick-actions" });
@@ -116,9 +112,12 @@ export class ArfidDashboardView extends ItemView {
 			if (statusClass) v.addClass(statusClass);
 			c.createDiv({ cls: "arfid-card-label", text: label });
 		};
-		card("Safe foods", foods.filter((f) => f.currentStatus === "safe").length, "arfid-text-safe");
-		card("Trying", foods.filter((f) => f.currentStatus === "trying").length, "arfid-text-trying");
-		card("Fear foods", foods.filter((f) => f.currentStatus === "fear").length, "arfid-text-fear");
+		const statusCounts = {} as Record<FoodStatus, number>;
+		for (const s of FOOD_STATUSES) statusCounts[s] = 0;
+		for (const f of foods) statusCounts[f.currentStatus]++;
+		card("Safe foods", statusCounts.safe, "arfid-text-safe");
+		card("Trying", statusCounts.trying, "arfid-text-trying");
+		card("Fear foods", statusCounts.fear, "arfid-text-fear");
 		card("Expansions · 30d", recentExpansions, "arfid-text-expanded");
 		card("Exposures · 30d", recentExposures);
 
@@ -140,7 +139,7 @@ export class ArfidDashboardView extends ItemView {
 		}
 		// only entries where something was actually consumed or attempted count
 		// as "meals logged" — baseline library imports and status changes don't
-		const consumed = entries.filter((e) => e.meal || e.outcome || e.exposure);
+		const consumed = entries.filter(isConsumed);
 		renderLineChart(
 			trendSection,
 			this.trendMode === "day" ? trendPerDay(consumed, 30) : trendPerWeek(consumed, 12),
@@ -173,7 +172,7 @@ export class ArfidDashboardView extends ItemView {
 		// recently logged
 		const recentSection = body.createDiv({ cls: "arfid-section" });
 		recentSection.createEl("h3", { text: "Recently logged" });
-		const recent = [...entries].reverse().filter((e) => !e.tags.includes("baseline")).slice(0, 10);
+		const recent = [...entries].reverse().filter((e) => e.kind !== "baseline").slice(0, 10);
 		if (recent.length === 0) {
 			recentSection.createDiv({ cls: "arfid-empty", text: "Nothing logged yet. Tap “+ Log food” to add your first entry." });
 		} else {
@@ -194,12 +193,7 @@ export class ArfidDashboardView extends ItemView {
 	// ---------------------------------------------------------------- foods
 
 	private renderFoods(body: HTMLElement, foods: FoodSummary[]): void {
-		const notesByFood = new Map<string, FoodNote[]>();
-		for (const n of this.plugin.store.getFoodNotes()) {
-			const list = notesByFood.get(n.key) ?? [];
-			list.push(n);
-			notesByFood.set(n.key, list);
-		}
+		const notesByFood = this.plugin.store.getFoodNotesByKey();
 		const topRow = body.createDiv({ cls: "arfid-foods-toolbar" });
 		const search = topRow.createEl("input", {
 			cls: "arfid-input arfid-search",
@@ -317,8 +311,8 @@ export class ArfidDashboardView extends ItemView {
 		const main = row.createSpan({ cls: "arfid-entry-main" });
 		main.createSpan({ cls: `arfid-status-dot arfid-status-${e.status}` });
 		main.createSpan({ text: showFood ? e.food : STATUS_LABELS[e.status] });
-		if (e.exposure) {
-			const step = e.exposureStep ? EXPOSURE_STEP_LABELS[e.exposureStep as Exclude<ExposureStep, "">].toLowerCase() : "";
+		if (e.kind === "exposure") {
+			const step = e.exposureStep ? EXPOSURE_STEP_LABELS[e.exposureStep].toLowerCase() : "";
 			row.createSpan({ cls: "arfid-entry-outcome", text: step ? `exposure · ${step}` : "exposure" });
 		} else {
 			const bits = [e.meal, e.outcome].filter((b) => b);
@@ -347,18 +341,24 @@ function trendPerDay(entries: FoodEntry[], days: number): SeriesPoint[] {
 }
 
 function trendPerWeek(entries: FoodEntry[], weeks: number): SeriesPoint[] {
-	const points: SeriesPoint[] = [];
 	const now = new Date();
 	// week starts on Monday
 	const day = (now.getDay() + 6) % 7;
 	const thisWeekStart = new Date(now.getFullYear(), now.getMonth(), now.getDate() - day);
+	const starts: string[] = [];
 	for (let i = weeks - 1; i >= 0; i--) {
-		const start = new Date(thisWeekStart.getTime() - i * 7 * 86400_000);
-		const end = new Date(start.getTime() + 7 * 86400_000);
-		const startKey = isoDate(start);
-		const endKey = isoDate(end);
-		const count = entries.filter((e) => e.date >= startKey && e.date < endKey).length;
-		points.push({ label: startKey.slice(5), value: count });
+		starts.push(isoDate(new Date(thisWeekStart.getTime() - i * 7 * 86400_000)));
 	}
-	return points;
+	// one pass: bucket each entry into the latest week starting on/before it
+	const counts = new Map<string, number>();
+	for (const e of entries) {
+		if (e.date < starts[0]) continue;
+		let bucket = starts[0];
+		for (const s of starts) {
+			if (s <= e.date) bucket = s;
+			else break;
+		}
+		counts.set(bucket, (counts.get(bucket) ?? 0) + 1);
+	}
+	return starts.map((s) => ({ label: s.slice(5), value: counts.get(s) ?? 0 }));
 }

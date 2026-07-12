@@ -25,7 +25,6 @@ export function renderLineChart(
 	points: SeriesPoint[],
 	unit: { singular: string; plural: string }
 ): void {
-	const unitLabel = unit.plural;
 	const wrap = parent.createDiv({ cls: "arfid-chart-wrap" });
 	if (points.length === 0) {
 		wrap.createDiv({ cls: "arfid-empty", text: "No entries yet." });
@@ -49,7 +48,7 @@ export function renderLineChart(
 		class: "arfid-linechart",
 		role: "img",
 	});
-	svg.setAttr("aria-label", `${unitLabel} over time`);
+	svg.setAttr("aria-label", `${unit.plural} over time`);
 
 	// recessive gridlines + y labels (0, half, top)
 	for (const v of [0, top / 2, top]) {

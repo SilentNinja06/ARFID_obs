@@ -87,10 +87,10 @@ export default class ArfidTrackerPlugin extends Plugin {
 
 		this.addSettingTab(new ArfidSettingTab(this.app, this));
 
-		// keep open dashboards fresh when entry notes change on disk
+		// keep the index and open dashboards fresh when notes change on disk
 		this.registerEvent(this.app.metadataCache.on("changed", (file) => this.maybeRefresh(file.path)));
-		this.registerEvent(this.app.vault.on("delete", () => this.scheduleRefresh()));
-		this.registerEvent(this.app.vault.on("rename", () => this.scheduleRefresh()));
+		this.registerEvent(this.app.vault.on("delete", () => this.notifyDataChanged()));
+		this.registerEvent(this.app.vault.on("rename", () => this.notifyDataChanged()));
 	}
 
 	openQuickLog(): void {
@@ -109,18 +109,9 @@ export default class ArfidTrackerPlugin extends Plugin {
 		this.app.workspace.revealLeaf(leaf);
 	}
 
+	/** Invalidate the store's index and re-render open dashboards (debounced). */
 	notifyDataChanged(): void {
-		this.scheduleRefresh();
-	}
-
-	private maybeRefresh(path: string): void {
-		const fm = this.app.metadataCache.getCache(path)?.frontmatter;
-		if (fm?.type === "food-entry" || fm?.type === "symptom-entry" || fm?.type === "food-note") {
-			this.scheduleRefresh();
-		}
-	}
-
-	private scheduleRefresh(): void {
+		this.store.invalidate();
 		if (this.refreshTimer !== null) window.clearTimeout(this.refreshTimer);
 		this.refreshTimer = window.setTimeout(() => {
 			this.refreshTimer = null;
@@ -129,6 +120,14 @@ export default class ArfidTrackerPlugin extends Plugin {
 				if (view instanceof ArfidDashboardView) view.render();
 			}
 		}, 400);
+	}
+
+	private maybeRefresh(path: string): void {
+		const fm = this.app.metadataCache.getCache(path)?.frontmatter;
+		const relevant =
+			fm?.type === "food-entry" || fm?.type === "symptom-entry" || fm?.type === "food-note";
+		// also react when a previously indexed note stops being one
+		if (relevant || this.store.contains(path)) this.notifyDataChanged();
 	}
 
 	async loadSettings(): Promise<void> {

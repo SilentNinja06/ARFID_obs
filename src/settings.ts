@@ -9,48 +9,62 @@ export class ArfidSettingTab extends PluginSettingTab {
 		this.plugin = plugin;
 	}
 
+	private addTextSetting(name: string, desc: string, placeholder: string, get: () => string, set: (v: string) => void): void {
+		new Setting(this.containerEl)
+			.setName(name)
+			.setDesc(desc)
+			.addText((t) =>
+				t.setPlaceholder(placeholder).setValue(get()).onChange(async (v) => {
+					set(v);
+					await this.plugin.saveSettings();
+				})
+			);
+	}
+
+	private addListSetting(name: string, desc: string, rows: number, get: () => string[], set: (v: string[]) => void): void {
+		new Setting(this.containerEl)
+			.setName(name)
+			.setDesc(desc)
+			.addTextArea((t) => {
+				t.setValue(get().join("\n")).onChange(async (v) => {
+					set(
+						v
+							.split("\n")
+							.map((s) => s.trim())
+							.filter((s) => s.length > 0)
+					);
+					await this.plugin.saveSettings();
+				});
+				t.inputEl.rows = rows;
+			});
+	}
+
 	display(): void {
 		const { containerEl } = this;
+		const s = this.plugin.settings;
 		containerEl.empty();
 
-		new Setting(containerEl)
-			.setName("Entries folder")
-			.setDesc("Where new food entries are created. Existing entries are found by their frontmatter (type: food-entry), so moving notes later is fine.")
-			.addText((t) =>
-				t
-					.setPlaceholder("Food Log")
-					.setValue(this.plugin.settings.entriesFolder)
-					.onChange(async (v) => {
-						this.plugin.settings.entriesFolder = v;
-						await this.plugin.saveSettings();
-					})
-			);
-
-		new Setting(containerEl)
-			.setName("Filename template")
-			.setDesc("Tokens: {{date}}, {{time}}, {{food}}.")
-			.addText((t) =>
-				t
-					.setPlaceholder("{{date}} {{time}} {{food}}")
-					.setValue(this.plugin.settings.filenameTemplate)
-					.onChange(async (v) => {
-						this.plugin.settings.filenameTemplate = v;
-						await this.plugin.saveSettings();
-					})
-			);
-
-		new Setting(containerEl)
-			.setName("Exports folder")
-			.setDesc("Where CSV and summary exports are written.")
-			.addText((t) =>
-				t
-					.setPlaceholder("Exports")
-					.setValue(this.plugin.settings.exportsFolder)
-					.onChange(async (v) => {
-						this.plugin.settings.exportsFolder = v;
-						await this.plugin.saveSettings();
-					})
-			);
+		this.addTextSetting(
+			"Entries folder",
+			"Where new food entries are created. Existing entries are found by their frontmatter (type: food-entry), so moving notes later is fine.",
+			"Food Log",
+			() => s.entriesFolder,
+			(v) => (s.entriesFolder = v)
+		);
+		this.addTextSetting(
+			"Filename template",
+			"Tokens: {{date}}, {{time}}, {{food}}.",
+			"{{date}} {{time}} {{food}}",
+			() => s.filenameTemplate,
+			(v) => (s.filenameTemplate = v)
+		);
+		this.addTextSetting(
+			"Exports folder",
+			"Where CSV and summary exports are written.",
+			"Exports",
+			() => s.exportsFolder,
+			(v) => (s.exportsFolder = v)
+		);
 
 		new Setting(containerEl).setName("Daily note linking").setHeading();
 
@@ -58,124 +72,72 @@ export class ArfidSettingTab extends PluginSettingTab {
 			.setName("Link entries into the daily note")
 			.setDesc("Insert a link into that day's daily note whenever an entry is logged. New daily notes are seeded from the Daily Notes core plugin's template.")
 			.addToggle((t) =>
-				t.setValue(this.plugin.settings.dailyNoteLinking).onChange(async (v) => {
-					this.plugin.settings.dailyNoteLinking = v;
+				t.setValue(s.dailyNoteLinking).onChange(async (v) => {
+					s.dailyNoteLinking = v;
 					await this.plugin.saveSettings();
 				})
 			);
-
-		new Setting(containerEl)
-			.setName("Placement marker")
-			.setDesc("Links are inserted after this marker if the daily note contains it (invisible in reading view). Put it in your daily-note template where food links should appear.")
-			.addText((t) =>
-				t
-					.setPlaceholder("%% arfid-log %%")
-					.setValue(this.plugin.settings.dailyNoteMarker)
-					.onChange(async (v) => {
-						this.plugin.settings.dailyNoteMarker = v;
-						await this.plugin.saveSettings();
-					})
-			);
-
-		new Setting(containerEl)
-			.setName("Fallback heading")
-			.setDesc("If the marker isn't found, links go under this heading wherever it sits; a heading is appended at the end only as a last resort.")
-			.addText((t) =>
-				t
-					.setPlaceholder("Food log")
-					.setValue(this.plugin.settings.dailyNoteHeading)
-					.onChange(async (v) => {
-						this.plugin.settings.dailyNoteHeading = v;
-						await this.plugin.saveSettings();
-					})
-			);
+		this.addTextSetting(
+			"Placement marker",
+			"Links are inserted after this marker if the daily note contains it (invisible in reading view). Put it in your daily-note template where food links should appear.",
+			"%% arfid-log %%",
+			() => s.dailyNoteMarker,
+			(v) => (s.dailyNoteMarker = v)
+		);
+		this.addTextSetting(
+			"Fallback heading",
+			"If the marker isn't found, links go under this heading wherever it sits; a heading is appended at the end only as a last resort.",
+			"Food log",
+			() => s.dailyNoteHeading,
+			(v) => (s.dailyNoteHeading = v)
+		);
 
 		new Setting(containerEl).setName("Quick-log chip lists").setHeading();
 
-		new Setting(containerEl)
-			.setName("Known strategies")
-			.setDesc("One per line. New strategies typed during logging are added here automatically.")
-			.addTextArea((t) => {
-				t.setValue(this.plugin.settings.knownStrategies.join("\n")).onChange(async (v) => {
-					this.plugin.settings.knownStrategies = v
-						.split("\n")
-						.map((s) => s.trim())
-						.filter((s) => s.length > 0);
-					await this.plugin.saveSettings();
-				});
-				t.inputEl.rows = 8;
-			});
-
-		new Setting(containerEl)
-			.setName("Known contexts")
-			.setDesc("One per line. New contexts typed during logging are added here automatically.")
-			.addTextArea((t) => {
-				t.setValue(this.plugin.settings.knownContexts.join("\n")).onChange(async (v) => {
-					this.plugin.settings.knownContexts = v
-						.split("\n")
-						.map((s) => s.trim())
-						.filter((s) => s.length > 0);
-					await this.plugin.saveSettings();
-				});
-				t.inputEl.rows = 6;
-			});
-
-		new Setting(containerEl)
-			.setName("Known symptoms")
-			.setDesc("One per line. New symptoms typed during logging are added here automatically.")
-			.addTextArea((t) => {
-				t.setValue(this.plugin.settings.knownSymptoms.join("\n")).onChange(async (v) => {
-					this.plugin.settings.knownSymptoms = v
-						.split("\n")
-						.map((s) => s.trim())
-						.filter((s) => s.length > 0);
-					await this.plugin.saveSettings();
-				});
-				t.inputEl.rows = 6;
-			});
+		this.addListSetting(
+			"Known strategies",
+			"One per line. New strategies typed during logging are added here automatically.",
+			8,
+			() => s.knownStrategies,
+			(v) => (s.knownStrategies = v)
+		);
+		this.addListSetting(
+			"Known contexts",
+			"One per line. New contexts typed during logging are added here automatically.",
+			6,
+			() => s.knownContexts,
+			(v) => (s.knownContexts = v)
+		);
+		this.addListSetting(
+			"Known symptoms",
+			"One per line. New symptoms typed during logging are added here automatically.",
+			6,
+			() => s.knownSymptoms,
+			(v) => (s.knownSymptoms = v)
+		);
 
 		new Setting(containerEl).setName("Support & reminders").setHeading();
 
-		new Setting(containerEl)
-			.setName("Kindness reminders")
-			.setDesc("One per line. A random one is shown on the “I'm struggling” screen.")
-			.addTextArea((t) => {
-				t.setValue(this.plugin.settings.kindnessReminders.join("\n")).onChange(async (v) => {
-					this.plugin.settings.kindnessReminders = v
-						.split("\n")
-						.map((s) => s.trim())
-						.filter((s) => s.length > 0);
-					await this.plugin.saveSettings();
-				});
-				t.inputEl.rows = 6;
-			});
-
-		new Setting(containerEl)
-			.setName("Environment checklist")
-			.setDesc("One per line. Shown on the “I'm struggling” screen — things that make eating easier.")
-			.addTextArea((t) => {
-				t.setValue(this.plugin.settings.environmentChecklist.join("\n")).onChange(async (v) => {
-					this.plugin.settings.environmentChecklist = v
-						.split("\n")
-						.map((s) => s.trim())
-						.filter((s) => s.length > 0);
-					await this.plugin.saveSettings();
-				});
-				t.inputEl.rows = 6;
-			});
-
-		new Setting(containerEl)
-			.setName("Exposure checklist")
-			.setDesc("One per line. Shown at the top of the exposure logging screen — the critical things to remember during an exposure.")
-			.addTextArea((t) => {
-				t.setValue(this.plugin.settings.exposureChecklist.join("\n")).onChange(async (v) => {
-					this.plugin.settings.exposureChecklist = v
-						.split("\n")
-						.map((s) => s.trim())
-						.filter((s) => s.length > 0);
-					await this.plugin.saveSettings();
-				});
-				t.inputEl.rows = 6;
-			});
+		this.addListSetting(
+			"Kindness reminders",
+			"One per line. A random one is shown on the “I'm struggling” screen.",
+			6,
+			() => s.kindnessReminders,
+			(v) => (s.kindnessReminders = v)
+		);
+		this.addListSetting(
+			"Environment checklist",
+			"One per line. Shown on the “I'm struggling” screen — things that make eating easier.",
+			6,
+			() => s.environmentChecklist,
+			(v) => (s.environmentChecklist = v)
+		);
+		this.addListSetting(
+			"Exposure checklist",
+			"One per line. Shown at the top of the exposure logging screen — the critical things to remember during an exposure.",
+			6,
+			() => s.exposureChecklist,
+			(v) => (s.exposureChecklist = v)
+		);
 	}
 }

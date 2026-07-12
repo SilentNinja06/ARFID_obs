@@ -1,27 +1,23 @@
-import { App, Modal, Notice } from "obsidian";
-import { isoDate, isoTime } from "./store";
+import { App, Notice } from "obsidian";
+import { nowStamp } from "./store";
 import { buildSymptomNote } from "./serialize";
-import { linkIntoDailyNote } from "./dailynote";
+import { saveEntryNote } from "./files";
 import { buildChipPicker } from "./chips";
-import { createEntryFile } from "./quicklog";
+import { ArfidModal } from "./modal";
 import type ArfidTrackerPlugin from "./main";
 
 /** Log ARFID-related symptoms (brain fog, jitters, lightheadedness…) as a
  * standalone timestamped note. One-tap chips, optional freeform note. */
-export class SymptomModal extends Modal {
-	private plugin: ArfidTrackerPlugin;
+export class SymptomModal extends ArfidModal {
 	private symptoms = new Set<string>();
 	private notes = "";
 
 	constructor(app: App, plugin: ArfidTrackerPlugin) {
-		super(app);
-		this.plugin = plugin;
+		super(app, plugin, "Log symptoms");
 	}
 
-	onOpen(): void {
+	protected buildContent(): void {
 		const { contentEl } = this;
-		contentEl.addClass("arfid-plugin", "arfid-quicklog");
-		this.titleEl.setText("Log symptoms");
 		contentEl.createDiv({
 			cls: "arfid-hint",
 			text: "Body signals worth tracking — they often connect back to how eating has gone.",
@@ -36,12 +32,7 @@ export class SymptomModal extends Modal {
 		});
 		notes.addEventListener("input", () => (this.notes = notes.value));
 
-		const save = contentEl.createEl("button", { cls: "arfid-save-btn", text: "Save symptoms" });
-		save.addEventListener("click", () => void this.save());
-		this.scope.register(["Mod"], "Enter", () => {
-			void this.save();
-			return false;
-		});
+		this.addSaveButton("Save symptoms", () => this.save());
 	}
 
 	private async save(): Promise<void> {
@@ -49,29 +40,13 @@ export class SymptomModal extends Modal {
 			new Notice("Pick at least one symptom.");
 			return;
 		}
-		const now = new Date();
-		const date = isoDate(now);
-		const time = isoTime(now);
+		const { date, time } = nowStamp();
 		const symptoms = [...this.symptoms];
-		const note = buildSymptomNote(date, time, symptoms, this.notes);
-
-		const file = await createEntryFile(this.app, this.plugin, date, time, "symptoms", note);
 		await this.plugin.saveSettings(); // persist auto-grown symptom list
-
-		if (this.plugin.settings.dailyNoteLinking) {
-			try {
-				await linkIntoDailyNote(this.app, this.plugin.settings, date, time, file.basename, `symptoms: ${symptoms.join(", ")}`);
-			} catch (e) {
-				console.error("ARFID Tracker: daily note linking failed", e);
-			}
-		}
-
-		new Notice("Symptoms logged.");
+		await saveEntryNote(this.plugin, date, time, "symptoms", buildSymptomNote(date, time, symptoms, this.notes), {
+			dailyLabel: `symptoms: ${symptoms.join(", ")}`,
+			notice: "Symptoms logged.",
+		});
 		this.close();
-		this.plugin.notifyDataChanged();
-	}
-
-	onClose(): void {
-		this.contentEl.empty();
 	}
 }

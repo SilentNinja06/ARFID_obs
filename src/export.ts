@@ -1,10 +1,10 @@
-import { App, Notice, TFile, TFolder, normalizePath } from "obsidian";
-import { EntryStore, isoDate } from "./store";
+import { App, Notice, TFile, normalizePath } from "obsidian";
+import { EntryStore, daysAgoIso, isoDate } from "./store";
+import { ensureFolder, normalizeFolder } from "./files";
 import {
 	ArfidSettings,
 	EXPOSURE_STEP_LABELS,
 	EXPOSURE_STEPS,
-	ExposureStep,
 	FOOD_STATUSES,
 	FoodEntry,
 	MEAL_LABELS,
@@ -124,11 +124,11 @@ export function buildMarkdownSummary(store: EntryStore): string {
 
 	lines.push(`## Exposure practice`);
 	lines.push("");
-	const exposures = entries.filter((e) => e.exposure);
+	const exposures = entries.filter((e) => e.kind === "exposure");
 	if (exposures.length === 0) {
 		lines.push("No exposures logged yet.");
 	} else {
-		const cutoff30 = isoDate(new Date(Date.now() - 30 * 86400_000));
+		const cutoff30 = daysAgoIso(30);
 		lines.push(`${exposures.length} exposures logged, ${exposures.filter((e) => e.date >= cutoff30).length} in the last 30 days.`);
 		lines.push("");
 		lines.push(`| Step reached | Count |`);
@@ -227,13 +227,14 @@ export function buildMarkdownSummary(store: EntryStore): string {
 		lines.push(`| Date | Time | Food | Kind | Status | Outcome | Strategies | Context |`);
 		lines.push(`| --- | --- | --- | --- | --- | --- | --- | --- |`);
 		for (const e of entries) {
-			const kind = e.exposure
-				? `exposure${e.exposureStep ? ` (${EXPOSURE_STEP_LABELS[e.exposureStep as Exclude<ExposureStep, "">].toLowerCase()})` : ""}`
-				: e.tags.includes("status-change")
-					? "status change"
-					: e.tags.includes("baseline")
-						? "baseline"
-						: e.meal || "—";
+			const kind =
+				e.kind === "exposure"
+					? `exposure${e.exposureStep ? ` (${EXPOSURE_STEP_LABELS[e.exposureStep].toLowerCase()})` : ""}`
+					: e.kind === "status-change"
+						? "status change"
+						: e.kind === "baseline"
+							? "baseline"
+							: e.meal || "—";
 			lines.push(
 				`| ${e.date} | ${e.time} | ${e.food} | ${kind} | ${STATUS_LABELS[e.status]} | ${e.outcome || "—"} | ${e.strategies.join(", ") || "—"} | ${e.context.join(", ") || "—"} |`
 			);
@@ -244,10 +245,8 @@ export function buildMarkdownSummary(store: EntryStore): string {
 }
 
 async function writeExport(app: App, settings: ArfidSettings, filename: string, content: string): Promise<TFile> {
-	const folder = settings.exportsFolder.trim().replace(/\/+$/, "");
-	if (folder && !(app.vault.getAbstractFileByPath(normalizePath(folder)) instanceof TFolder)) {
-		await app.vault.createFolder(normalizePath(folder)).catch(() => {});
-	}
+	const folder = normalizeFolder(settings.exportsFolder);
+	await ensureFolder(app, folder);
 	const path = normalizePath((folder ? folder + "/" : "") + filename);
 	const existing = app.vault.getAbstractFileByPath(path);
 	if (existing instanceof TFile) {

@@ -11,54 +11,104 @@ import {
 	MealType,
 	NOTE_KINDS,
 	NoteKind,
-	SymptomEntry,
 	Outcome,
 	OUTCOMES,
 	StatusShift,
 	StrategyStat,
 	StrategyWorked,
+	SymptomEntry,
+	deriveEntryKind,
 	normalizeFoodKey,
 	splitList,
 } from "./types";
 
-/** Reads food entries from the vault. Entries are discovered by
- * `type: food-entry` frontmatter, never by folder path, so notes can be
- * reorganized freely. */
+interface Index {
+	entries: FoodEntry[];
+	symptoms: SymptomEntry[];
+	foodNotes: FoodNote[];
+	paths: Set<string>;
+}
+
+/** Reads the plugin's notes from the vault. Notes are discovered by their
+ * `type` frontmatter, never by folder path, so they can be reorganized
+ * freely. The index is built in one vault pass and cached; the plugin
+ * invalidates it from metadata/vault events. */
 export class EntryStore {
+	private index: Index | null = null;
+
 	constructor(private app: App) {}
 
-	getEntries(): FoodEntry[] {
-		const entries: FoodEntry[] = [];
-		for (const file of this.app.vault.getMarkdownFiles()) {
-			const fm = this.app.metadataCache.getFileCache(file)?.frontmatter;
-			if (!fm || fm.type !== "food-entry") continue;
-			const entry = this.parseEntry(file, fm);
-			if (entry) entries.push(entry);
-		}
-		entries.sort((a, b) => sortKey(a).localeCompare(sortKey(b)));
-		return entries;
+	/** Drop the cached index; the next read rebuilds it. */
+	invalidate(): void {
+		this.index = null;
 	}
 
-	private parseEntry(file: TFile, fm: Record<string, unknown>): FoodEntry | null {
-		const food = String(fm.food ?? "").trim();
-		if (!food) return null;
-		return {
-			file,
-			date: normalizeDate(fm.date),
-			time: normalizeTime(fm.time),
-			food,
-			meal: normalizeMeal(fm.meal),
-			status: normalizeStatus(fm.status),
-			outcome: normalizeOutcome(fm.outcome),
-			exposure: fm.exposure === true || fm.exposure === "true",
-			exposureStep: normalizeExposureStep(fm.exposure_step),
-			statusReason: String(fm.status_reason ?? "").trim(),
-			textureNotes: String(fm.texture_notes ?? ""),
-			context: splitList(fm.context),
-			strategies: splitList(fm.strategy_used),
-			strategyWorked: normalizeWorked(fm.strategy_worked),
-			tags: splitList(fm.tags),
-		};
+	/** Whether this path was indexed as one of the plugin's notes — used to
+	 * catch edits that remove a note from the dataset. */
+	contains(path: string): boolean {
+		return this.index?.paths.has(path) ?? false;
+	}
+
+	private getIndex(): Index {
+		if (this.index) return this.index;
+		const entries: FoodEntry[] = [];
+		const symptoms: SymptomEntry[] = [];
+		const foodNotes: FoodNote[] = [];
+		const paths = new Set<string>();
+		for (const file of this.app.vault.getMarkdownFiles()) {
+			const fm = this.app.metadataCache.getFileCache(file)?.frontmatter;
+			if (!fm) continue;
+			if (fm.type === "food-entry") {
+				const entry = parseEntry(file, fm);
+				if (entry) {
+					entries.push(entry);
+					paths.add(file.path);
+				}
+			} else if (fm.type === "symptom-entry") {
+				symptoms.push({
+					file,
+					date: normalizeDate(fm.date),
+					time: normalizeTime(fm.time),
+					symptoms: splitList(fm.symptoms),
+				});
+				paths.add(file.path);
+			} else if (fm.type === "food-note") {
+				const note = parseFoodNote(file, fm);
+				if (note) {
+					foodNotes.push(note);
+					paths.add(file.path);
+				}
+			}
+		}
+		entries.sort((a, b) => stampOf(a).localeCompare(stampOf(b)));
+		symptoms.sort((a, b) => stampOf(a).localeCompare(stampOf(b)));
+		foodNotes.sort((a, b) => a.key.localeCompare(b.key) || a.date.localeCompare(b.date));
+		this.index = { entries, symptoms, foodNotes, paths };
+		return this.index;
+	}
+
+	getEntries(): FoodEntry[] {
+		return this.getIndex().entries;
+	}
+
+	/** Standalone symptom logs (`type: symptom-entry`), chronological. */
+	getSymptomEntries(): SymptomEntry[] {
+		return this.getIndex().symptoms;
+	}
+
+	/** Per-food companion notes (`type: food-note`): rituals, orders, recipes. */
+	getFoodNotes(): FoodNote[] {
+		return this.getIndex().foodNotes;
+	}
+
+	getFoodNotesByKey(): Map<string, FoodNote[]> {
+		const byKey = new Map<string, FoodNote[]>();
+		for (const n of this.getFoodNotes()) {
+			const list = byKey.get(n.key) ?? [];
+			list.push(n);
+			byKey.set(n.key, list);
+		}
+		return byKey;
 	}
 
 	/** All foods ever logged, keyed by normalized name, chronological entries. */
@@ -101,60 +151,6 @@ export class EntryStore {
 		return shifts;
 	}
 
-	/** Standalone symptom logs (`type: symptom-entry`), chronological. */
-	getSymptomEntries(): SymptomEntry[] {
-		const out: SymptomEntry[] = [];
-		for (const file of this.app.vault.getMarkdownFiles()) {
-			const fm = this.app.metadataCache.getFileCache(file)?.frontmatter;
-			if (!fm || fm.type !== "symptom-entry") continue;
-			out.push({
-				file,
-				date: normalizeDate(fm.date),
-				time: normalizeTime(fm.time),
-				symptoms: splitList(fm.symptoms),
-			});
-		}
-		out.sort((a, b) => `${a.date} ${a.time}`.localeCompare(`${b.date} ${b.time}`));
-		return out;
-	}
-
-	getSymptomStats(entries?: SymptomEntry[]): { name: string; count: number }[] {
-		const byName = new Map<string, { name: string; count: number }>();
-		for (const e of entries ?? this.getSymptomEntries()) {
-			for (const raw of e.symptoms) {
-				const key = raw.toLowerCase();
-				let s = byName.get(key);
-				if (!s) {
-					s = { name: raw, count: 0 };
-					byName.set(key, s);
-				}
-				s.count++;
-			}
-		}
-		return [...byName.values()].sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
-	}
-
-	/** Per-food companion notes (`type: food-note`): rituals, orders, recipes. */
-	getFoodNotes(): FoodNote[] {
-		const out: FoodNote[] = [];
-		for (const file of this.app.vault.getMarkdownFiles()) {
-			const fm = this.app.metadataCache.getFileCache(file)?.frontmatter;
-			if (!fm || fm.type !== "food-note") continue;
-			const food = String(fm.food ?? "").trim();
-			if (!food) continue;
-			const kind = String(fm.note_kind ?? "").trim().toLowerCase();
-			out.push({
-				file,
-				food,
-				key: normalizeFoodKey(food),
-				kind: (NOTE_KINDS as readonly string[]).includes(kind) ? (kind as NoteKind) : "ritual",
-				date: normalizeDate(fm.date),
-			});
-		}
-		out.sort((a, b) => a.key.localeCompare(b.key) || a.date.localeCompare(b.date));
-		return out;
-	}
-
 	getStrategyStats(entries?: FoodEntry[]): StrategyStat[] {
 		const byName = new Map<string, StrategyStat>();
 		for (const e of entries ?? this.getEntries()) {
@@ -174,9 +170,65 @@ export class EntryStore {
 		}
 		return [...byName.values()].sort((a, b) => b.uses - a.uses || a.name.localeCompare(b.name));
 	}
+
+	getSymptomStats(entries?: SymptomEntry[]): { name: string; count: number }[] {
+		const byName = new Map<string, { name: string; count: number }>();
+		for (const e of entries ?? this.getSymptomEntries()) {
+			for (const raw of e.symptoms) {
+				const key = raw.toLowerCase();
+				let s = byName.get(key);
+				if (!s) {
+					s = { name: raw, count: 0 };
+					byName.set(key, s);
+				}
+				s.count++;
+			}
+		}
+		return [...byName.values()].sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
+	}
 }
 
-function sortKey(e: FoodEntry): string {
+// ---------------------------------------------------------------- parsing
+
+function parseEntry(file: TFile, fm: Record<string, unknown>): FoodEntry | null {
+	const food = String(fm.food ?? "").trim();
+	if (!food) return null;
+	const exposure = fm.exposure === true || fm.exposure === "true";
+	const tags = splitList(fm.tags);
+	return {
+		file,
+		date: normalizeDate(fm.date),
+		time: normalizeTime(fm.time),
+		food,
+		meal: normalizeMeal(fm.meal),
+		status: normalizeStatus(fm.status),
+		outcome: normalizeOutcome(fm.outcome),
+		kind: deriveEntryKind(exposure, tags),
+		exposure,
+		exposureStep: normalizeExposureStep(fm.exposure_step),
+		statusReason: String(fm.status_reason ?? "").trim(),
+		textureNotes: String(fm.texture_notes ?? ""),
+		context: splitList(fm.context),
+		strategies: splitList(fm.strategy_used),
+		strategyWorked: normalizeWorked(fm.strategy_worked),
+		tags,
+	};
+}
+
+function parseFoodNote(file: TFile, fm: Record<string, unknown>): FoodNote | null {
+	const food = String(fm.food ?? "").trim();
+	if (!food) return null;
+	const kind = String(fm.note_kind ?? "").trim().toLowerCase();
+	return {
+		file,
+		food,
+		key: normalizeFoodKey(food),
+		kind: (NOTE_KINDS as readonly string[]).includes(kind) ? (kind as NoteKind) : "ritual",
+		date: normalizeDate(fm.date),
+	};
+}
+
+function stampOf(e: { date: string; time: string }): string {
 	return `${e.date} ${e.time}`;
 }
 
@@ -225,6 +277,8 @@ function normalizeWorked(value: unknown): StrategyWorked {
 	return "n/a";
 }
 
+// ------------------------------------------------------------- date utils
+
 export function isoDate(d: Date): string {
 	const y = d.getFullYear();
 	const m = String(d.getMonth() + 1).padStart(2, "0");
@@ -234,4 +288,13 @@ export function isoDate(d: Date): string {
 
 export function isoTime(d: Date): string {
 	return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+}
+
+export function nowStamp(): { date: string; time: string } {
+	const now = new Date();
+	return { date: isoDate(now), time: isoTime(now) };
+}
+
+export function daysAgoIso(days: number): string {
+	return isoDate(new Date(Date.now() - days * 86400_000));
 }

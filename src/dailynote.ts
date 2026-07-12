@@ -92,7 +92,7 @@ export function insertLogLine(
 	const marker = settings.dailyNoteMarker.trim();
 	let anchor = -1;
 	if (marker) {
-		anchor = lines.findIndex((l) => l.trim() === marker || l.includes(marker));
+		anchor = lines.findIndex((l) => l.includes(marker));
 	}
 	if (anchor === -1) {
 		const heading = settings.dailyNoteHeading.trim().toLowerCase().replace(/:$/, "");
