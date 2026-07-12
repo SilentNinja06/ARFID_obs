@@ -231,7 +231,9 @@ export function buildMarkdownSummary(store: EntryStore): string {
 				? `exposure${e.exposureStep ? ` (${EXPOSURE_STEP_LABELS[e.exposureStep as Exclude<ExposureStep, "">].toLowerCase()})` : ""}`
 				: e.tags.includes("status-change")
 					? "status change"
-					: e.meal || "—";
+					: e.tags.includes("baseline")
+						? "baseline"
+						: e.meal || "—";
 			lines.push(
 				`| ${e.date} | ${e.time} | ${e.food} | ${kind} | ${STATUS_LABELS[e.status]} | ${e.outcome || "—"} | ${e.strategies.join(", ") || "—"} | ${e.context.join(", ") || "—"} |`
 			);

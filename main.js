@@ -27,7 +27,7 @@ __export(main_exports, {
   default: () => ArfidTrackerPlugin
 });
 module.exports = __toCommonJS(main_exports);
-var import_obsidian11 = require("obsidian");
+var import_obsidian12 = require("obsidian");
 
 // src/types.ts
 var FOOD_STATUSES = ["safe", "trying", "fear", "recently-expanded"];
@@ -1486,8 +1486,106 @@ var StatusChangeModal = class extends import_obsidian8.Modal {
   }
 };
 
+// src/addfoods.ts
+var import_obsidian9 = require("obsidian");
+var AddFoodsModal = class extends import_obsidian9.Modal {
+  constructor(app, plugin) {
+    super(app);
+    this.inputs = /* @__PURE__ */ new Map();
+    this.plugin = plugin;
+  }
+  onOpen() {
+    const { contentEl } = this;
+    contentEl.addClass("arfid-plugin", "arfid-quicklog");
+    this.titleEl.setText("Add foods to your library");
+    contentEl.createDiv({
+      cls: "arfid-hint",
+      text: "Enter the foods you already know, one per line (commas work too). Nothing here is logged as eaten \u2014 it just puts your existing lists into the system."
+    });
+    for (const status of FOOD_STATUSES) {
+      const label = contentEl.createDiv({ cls: "arfid-field-label arfid-status-field-label" });
+      label.createSpan({ cls: `arfid-status-dot arfid-status-${status}` });
+      label.createSpan({ text: ` ${STATUS_LABELS[status]} foods` });
+      const ta = contentEl.createEl("textarea", {
+        cls: "arfid-textarea",
+        attr: { rows: "3", placeholder: `e.g. ${placeholderFor(status)}` }
+      });
+      this.inputs.set(status, ta);
+    }
+    const save = contentEl.createEl("button", { cls: "arfid-save-btn", text: "Add foods" });
+    save.addEventListener("click", () => void this.save());
+  }
+  async save() {
+    var _a, _b;
+    const knownKeys = new Set(this.plugin.store.getFoods().map((f) => f.key));
+    const now = /* @__PURE__ */ new Date();
+    const date = isoDate(now);
+    const time = isoTime(now);
+    let added = 0;
+    const skipped = [];
+    const seen = /* @__PURE__ */ new Set();
+    for (const status of FOOD_STATUSES) {
+      const raw = (_b = (_a = this.inputs.get(status)) == null ? void 0 : _a.value) != null ? _b : "";
+      const foods = raw.split(/[\n,]/).map((s) => s.trim()).filter((s) => s.length > 0);
+      for (const food of foods) {
+        const key = normalizeFoodKey(food);
+        if (seen.has(key)) continue;
+        seen.add(key);
+        if (knownKeys.has(key)) {
+          skipped.push(food);
+          continue;
+        }
+        const note = buildEntryNote({
+          date,
+          time,
+          food,
+          meal: "",
+          status,
+          outcome: "",
+          exposure: false,
+          exposureStep: "",
+          statusReason: "",
+          textureNotes: "",
+          context: [],
+          strategies: [],
+          strategyWorked: "n/a",
+          tags: ["baseline"]
+        });
+        await createEntryFile(this.app, this.plugin, date, time, food, note);
+        added++;
+      }
+    }
+    if (added === 0 && skipped.length === 0) {
+      new import_obsidian9.Notice("Nothing to add \u2014 enter some foods first.");
+      return;
+    }
+    let msg = `Added ${added} food${added === 1 ? "" : "s"} to your library.`;
+    if (skipped.length > 0) {
+      msg += ` Already tracked (unchanged): ${skipped.join(", ")} \u2014 use \u201CChange a food's status\u201D to move them.`;
+    }
+    new import_obsidian9.Notice(msg, skipped.length > 0 ? 8e3 : 4e3);
+    this.close();
+    this.plugin.notifyDataChanged();
+  }
+  onClose() {
+    this.contentEl.empty();
+  }
+};
+function placeholderFor(status) {
+  switch (status) {
+    case "safe":
+      return "chicken nuggets, white rice, pretzels";
+    case "trying":
+      return "cheese curds";
+    case "fear":
+      return "mixed casseroles, mushy vegetables";
+    case "recently-expanded":
+      return "scrambled eggs";
+  }
+}
+
 // src/dashboard.ts
-var import_obsidian10 = require("obsidian");
+var import_obsidian11 = require("obsidian");
 
 // src/charts.ts
 var SVG_NS = "http://www.w3.org/2000/svg";
@@ -1599,7 +1697,7 @@ function renderBars(parent, rows, emptyText) {
 }
 
 // src/export.ts
-var import_obsidian9 = require("obsidian");
+var import_obsidian10 = require("obsidian");
 function csvCell(value) {
   if (/[",\n]/.test(value)) return '"' + value.replace(/"/g, '""') + '"';
   return value;
@@ -1798,7 +1896,7 @@ function buildMarkdownSummary(store) {
     lines.push(`| Date | Time | Food | Kind | Status | Outcome | Strategies | Context |`);
     lines.push(`| --- | --- | --- | --- | --- | --- | --- | --- |`);
     for (const e of entries) {
-      const kind = e.exposure ? `exposure${e.exposureStep ? ` (${EXPOSURE_STEP_LABELS[e.exposureStep].toLowerCase()})` : ""}` : e.tags.includes("status-change") ? "status change" : e.meal || "\u2014";
+      const kind = e.exposure ? `exposure${e.exposureStep ? ` (${EXPOSURE_STEP_LABELS[e.exposureStep].toLowerCase()})` : ""}` : e.tags.includes("status-change") ? "status change" : e.tags.includes("baseline") ? "baseline" : e.meal || "\u2014";
       lines.push(
         `| ${e.date} | ${e.time} | ${e.food} | ${kind} | ${STATUS_LABELS[e.status]} | ${e.outcome || "\u2014"} | ${e.strategies.join(", ") || "\u2014"} | ${e.context.join(", ") || "\u2014"} |`
       );
@@ -1809,13 +1907,13 @@ function buildMarkdownSummary(store) {
 }
 async function writeExport(app, settings, filename, content) {
   const folder = settings.exportsFolder.trim().replace(/\/+$/, "");
-  if (folder && !(app.vault.getAbstractFileByPath((0, import_obsidian9.normalizePath)(folder)) instanceof import_obsidian9.TFolder)) {
-    await app.vault.createFolder((0, import_obsidian9.normalizePath)(folder)).catch(() => {
+  if (folder && !(app.vault.getAbstractFileByPath((0, import_obsidian10.normalizePath)(folder)) instanceof import_obsidian10.TFolder)) {
+    await app.vault.createFolder((0, import_obsidian10.normalizePath)(folder)).catch(() => {
     });
   }
-  const path = (0, import_obsidian9.normalizePath)((folder ? folder + "/" : "") + filename);
+  const path = (0, import_obsidian10.normalizePath)((folder ? folder + "/" : "") + filename);
   const existing = app.vault.getAbstractFileByPath(path);
-  if (existing instanceof import_obsidian9.TFile) {
+  if (existing instanceof import_obsidian10.TFile) {
     await app.vault.modify(existing, content);
     return existing;
   }
@@ -1829,19 +1927,19 @@ async function exportCsv(app, settings, store) {
   if (symptoms.length > 0) {
     await writeExport(app, settings, `arfid-symptoms-${isoDate(/* @__PURE__ */ new Date())}.csv`, buildSymptomCsv(symptoms));
   }
-  new import_obsidian9.Notice(
+  new import_obsidian10.Notice(
     `Exported ${entries.length} entries${symptoms.length > 0 ? ` and ${symptoms.length} symptom logs` : ""} to ${(_b = (_a = file.parent) == null ? void 0 : _a.path) != null ? _b : file.path}`
   );
 }
 async function exportSummary(app, settings, store) {
   const file = await writeExport(app, settings, `arfid-summary-${isoDate(/* @__PURE__ */ new Date())}.md`, buildMarkdownSummary(store));
-  new import_obsidian9.Notice(`Summary written to ${file.path}`);
+  new import_obsidian10.Notice(`Summary written to ${file.path}`);
   await app.workspace.getLeaf(true).openFile(file);
 }
 
 // src/dashboard.ts
 var VIEW_TYPE_ARFID = "arfid-dashboard";
-var ArfidDashboardView = class extends import_obsidian10.ItemView {
+var ArfidDashboardView = class extends import_obsidian11.ItemView {
   constructor(leaf, plugin) {
     super(leaf);
     this.tab = "overview";
@@ -1931,9 +2029,10 @@ var ArfidDashboardView = class extends import_obsidian10.ItemView {
         this.render();
       });
     }
+    const consumed = entries.filter((e) => e.meal || e.outcome || e.exposure);
     renderLineChart(
       trendSection,
-      this.trendMode === "day" ? trendPerDay(entries, 30) : trendPerWeek(entries, 12),
+      this.trendMode === "day" ? trendPerDay(consumed, 30) : trendPerWeek(consumed, 12),
       { singular: "entry", plural: "entries" }
     );
     const shiftSection = body.createDiv({ cls: "arfid-section" });
@@ -1959,7 +2058,7 @@ var ArfidDashboardView = class extends import_obsidian10.ItemView {
     }
     const recentSection = body.createDiv({ cls: "arfid-section" });
     recentSection.createEl("h3", { text: "Recently logged" });
-    const recent = [...entries].reverse().slice(0, 10);
+    const recent = [...entries].reverse().filter((e) => !e.tags.includes("baseline")).slice(0, 10);
     if (recent.length === 0) {
       recentSection.createDiv({ cls: "arfid-empty", text: "Nothing logged yet. Tap \u201C+ Log food\u201D to add your first entry." });
     } else {
@@ -1983,11 +2082,14 @@ var ArfidDashboardView = class extends import_obsidian10.ItemView {
       list.push(n);
       notesByFood.set(n.key, list);
     }
-    const search = body.createEl("input", {
+    const topRow = body.createDiv({ cls: "arfid-foods-toolbar" });
+    const search = topRow.createEl("input", {
       cls: "arfid-input arfid-search",
       attr: { type: "search", placeholder: "Search foods\u2026" }
     });
     search.value = this.foodSearch;
+    const addBtn = topRow.createEl("button", { cls: "arfid-chip", text: "+ Add foods" });
+    addBtn.addEventListener("click", () => new AddFoodsModal(this.app, this.plugin).open());
     const groups = body.createDiv();
     search.addEventListener("input", () => {
       this.foodSearch = search.value;
@@ -2134,7 +2236,7 @@ function trendPerWeek(entries, weeks) {
 }
 
 // src/main.ts
-var ArfidTrackerPlugin = class extends import_obsidian11.Plugin {
+var ArfidTrackerPlugin = class extends import_obsidian12.Plugin {
   constructor() {
     super(...arguments);
     this.settings = DEFAULT_SETTINGS;
@@ -2185,6 +2287,11 @@ var ArfidTrackerPlugin = class extends import_obsidian11.Plugin {
       id: "add-food-note",
       name: "Add a ritual, order, or recipe for a food",
       callback: () => new FoodNoteModal(this.app, this).open()
+    });
+    this.addCommand({
+      id: "add-foods",
+      name: "Add foods to library (without logging a meal)",
+      callback: () => new AddFoodsModal(this.app, this).open()
     });
     this.addCommand({
       id: "export-csv",

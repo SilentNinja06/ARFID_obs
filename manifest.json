@@ -1,7 +1,7 @@
 {
 	"id": "arfid-tracker",
 	"name": "ARFID Tracker",
-	"version": "1.1.0",
+	"version": "1.2.0",
 	"minAppVersion": "1.4.0",
 	"description": "Track safe/fear foods, exposures, and meals to see trends over time and support gradual food expansion. Mobile-first quick logging, food library, dashboard, strategy tracker, and clinician-ready exports.",
 	"author": "SilentNinja06",

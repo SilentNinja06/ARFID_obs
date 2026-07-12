@@ -8,6 +8,7 @@ import { StrugglingModal } from "./struggling";
 import { SymptomModal } from "./symptoms";
 import { FoodNoteModal } from "./foodnote";
 import { StatusChangeModal } from "./statuschange";
+import { AddFoodsModal } from "./addfoods";
 import { ArfidDashboardView, VIEW_TYPE_ARFID } from "./dashboard";
 import { exportCsv, exportSummary } from "./export";
 
@@ -62,6 +63,11 @@ export default class ArfidTrackerPlugin extends Plugin {
 			id: "add-food-note",
 			name: "Add a ritual, order, or recipe for a food",
 			callback: () => new FoodNoteModal(this.app, this).open(),
+		});
+		this.addCommand({
+			id: "add-foods",
+			name: "Add foods to library (without logging a meal)",
+			callback: () => new AddFoodsModal(this.app, this).open(),
 		});
 		this.addCommand({
 			id: "export-csv",

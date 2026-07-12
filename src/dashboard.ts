@@ -20,6 +20,7 @@ import { StrugglingModal } from "./struggling";
 import { SymptomModal } from "./symptoms";
 import { FoodNoteModal } from "./foodnote";
 import { StatusChangeModal } from "./statuschange";
+import { AddFoodsModal } from "./addfoods";
 import type ArfidTrackerPlugin from "./main";
 
 export const VIEW_TYPE_ARFID = "arfid-dashboard";
@@ -137,9 +138,12 @@ export class ArfidDashboardView extends ItemView {
 				this.render();
 			});
 		}
+		// only entries where something was actually consumed or attempted count
+		// as "meals logged" — baseline library imports and status changes don't
+		const consumed = entries.filter((e) => e.meal || e.outcome || e.exposure);
 		renderLineChart(
 			trendSection,
-			this.trendMode === "day" ? trendPerDay(entries, 30) : trendPerWeek(entries, 12),
+			this.trendMode === "day" ? trendPerDay(consumed, 30) : trendPerWeek(consumed, 12),
 			{ singular: "entry", plural: "entries" }
 		);
 
@@ -169,7 +173,7 @@ export class ArfidDashboardView extends ItemView {
 		// recently logged
 		const recentSection = body.createDiv({ cls: "arfid-section" });
 		recentSection.createEl("h3", { text: "Recently logged" });
-		const recent = [...entries].reverse().slice(0, 10);
+		const recent = [...entries].reverse().filter((e) => !e.tags.includes("baseline")).slice(0, 10);
 		if (recent.length === 0) {
 			recentSection.createDiv({ cls: "arfid-empty", text: "Nothing logged yet. Tap “+ Log food” to add your first entry." });
 		} else {
@@ -196,11 +200,14 @@ export class ArfidDashboardView extends ItemView {
 			list.push(n);
 			notesByFood.set(n.key, list);
 		}
-		const search = body.createEl("input", {
+		const topRow = body.createDiv({ cls: "arfid-foods-toolbar" });
+		const search = topRow.createEl("input", {
 			cls: "arfid-input arfid-search",
 			attr: { type: "search", placeholder: "Search foods…" },
 		});
 		search.value = this.foodSearch;
+		const addBtn = topRow.createEl("button", { cls: "arfid-chip", text: "+ Add foods" });
+		addBtn.addEventListener("click", () => new AddFoodsModal(this.app, this.plugin).open());
 		const groups = body.createDiv();
 		search.addEventListener("input", () => {
 			this.foodSearch = search.value;

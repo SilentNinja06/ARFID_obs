@@ -19,6 +19,10 @@ daily-note linking, inline SVG charts, and the same release setup.
 - **Food library** — every food ever logged, grouped by current status
   (safe / trying / fear / recently expanded), searchable, tap a food to see its
   full history inline.
+- **Bulk import your known foods** — "+ Add foods" in the library (or the
+  command palette) takes your existing safe/trying/fear/expanded lists, one
+  food per line, and adds them as baseline entries without logging anything
+  as eaten. Baselines never count as meals in trends or the recent list.
 - **Dashboard** — summary cards (safe / trying / fear counts, expansions in the
   last 30 days), a meals-logged trend chart (30 days or 12 weeks), a status
   shift tracker showing foods that moved between fear → trying → safe with

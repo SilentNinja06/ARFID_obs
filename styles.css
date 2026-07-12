@@ -435,6 +435,33 @@
 	margin-bottom: 0.6em;
 }
 
+.arfid-foods-toolbar {
+	display: flex;
+	gap: 0.5em;
+	align-items: stretch;
+	margin-bottom: 0.6em;
+}
+
+.arfid-foods-toolbar .arfid-search {
+	flex: 1;
+	margin-bottom: 0;
+}
+
+.arfid-foods-toolbar .arfid-chip {
+	flex-shrink: 0;
+}
+
+.arfid-status-field-label {
+	display: flex;
+	align-items: center;
+	gap: 0.4em;
+	text-transform: none;
+	letter-spacing: normal;
+	font-size: 0.9em;
+	font-weight: 600;
+	color: var(--text-normal);
+}
+
 /* --------------------------------------------------------------- toggle */
 
 .arfid-toggle {
