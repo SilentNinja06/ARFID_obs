@@ -1,9 +1,17 @@
 import { App, TFile } from "obsidian";
 import {
+	EXPOSURE_STEPS,
+	ExposureStep,
 	FOOD_STATUSES,
 	FoodEntry,
+	FoodNote,
 	FoodStatus,
 	FoodSummary,
+	MEAL_TYPES,
+	MealType,
+	NOTE_KINDS,
+	NoteKind,
+	SymptomEntry,
 	Outcome,
 	OUTCOMES,
 	StatusShift,
@@ -39,8 +47,12 @@ export class EntryStore {
 			date: normalizeDate(fm.date),
 			time: normalizeTime(fm.time),
 			food,
+			meal: normalizeMeal(fm.meal),
 			status: normalizeStatus(fm.status),
 			outcome: normalizeOutcome(fm.outcome),
+			exposure: fm.exposure === true || fm.exposure === "true",
+			exposureStep: normalizeExposureStep(fm.exposure_step),
+			statusReason: String(fm.status_reason ?? "").trim(),
 			textureNotes: String(fm.texture_notes ?? ""),
 			context: splitList(fm.context),
 			strategies: splitList(fm.strategy_used),
@@ -80,13 +92,67 @@ export class EntryStore {
 			let prev: FoodStatus | null = null;
 			for (const e of food.entries) {
 				if (prev !== null && e.status !== prev) {
-					shifts.push({ food: food.name, from: prev, to: e.status, date: e.date });
+					shifts.push({ food: food.name, from: prev, to: e.status, date: e.date, reason: e.statusReason });
 				}
 				prev = e.status;
 			}
 		}
 		shifts.sort((a, b) => a.date.localeCompare(b.date));
 		return shifts;
+	}
+
+	/** Standalone symptom logs (`type: symptom-entry`), chronological. */
+	getSymptomEntries(): SymptomEntry[] {
+		const out: SymptomEntry[] = [];
+		for (const file of this.app.vault.getMarkdownFiles()) {
+			const fm = this.app.metadataCache.getFileCache(file)?.frontmatter;
+			if (!fm || fm.type !== "symptom-entry") continue;
+			out.push({
+				file,
+				date: normalizeDate(fm.date),
+				time: normalizeTime(fm.time),
+				symptoms: splitList(fm.symptoms),
+			});
+		}
+		out.sort((a, b) => `${a.date} ${a.time}`.localeCompare(`${b.date} ${b.time}`));
+		return out;
+	}
+
+	getSymptomStats(entries?: SymptomEntry[]): { name: string; count: number }[] {
+		const byName = new Map<string, { name: string; count: number }>();
+		for (const e of entries ?? this.getSymptomEntries()) {
+			for (const raw of e.symptoms) {
+				const key = raw.toLowerCase();
+				let s = byName.get(key);
+				if (!s) {
+					s = { name: raw, count: 0 };
+					byName.set(key, s);
+				}
+				s.count++;
+			}
+		}
+		return [...byName.values()].sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
+	}
+
+	/** Per-food companion notes (`type: food-note`): rituals, orders, recipes. */
+	getFoodNotes(): FoodNote[] {
+		const out: FoodNote[] = [];
+		for (const file of this.app.vault.getMarkdownFiles()) {
+			const fm = this.app.metadataCache.getFileCache(file)?.frontmatter;
+			if (!fm || fm.type !== "food-note") continue;
+			const food = String(fm.food ?? "").trim();
+			if (!food) continue;
+			const kind = String(fm.note_kind ?? "").trim().toLowerCase();
+			out.push({
+				file,
+				food,
+				key: normalizeFoodKey(food),
+				kind: (NOTE_KINDS as readonly string[]).includes(kind) ? (kind as NoteKind) : "ritual",
+				date: normalizeDate(fm.date),
+			});
+		}
+		out.sort((a, b) => a.key.localeCompare(b.key) || a.date.localeCompare(b.date));
+		return out;
 	}
 
 	getStrategyStats(entries?: FoodEntry[]): StrategyStat[] {
@@ -136,6 +202,16 @@ function normalizeStatus(value: unknown): FoodStatus {
 	// tolerate close variants in hand-edited notes
 	if (s === "expanded" || s === "recently expanded") return "recently-expanded";
 	return "trying";
+}
+
+function normalizeMeal(value: unknown): MealType {
+	const s = String(value ?? "").trim().toLowerCase();
+	return (MEAL_TYPES as readonly string[]).includes(s) ? (s as MealType) : "";
+}
+
+function normalizeExposureStep(value: unknown): ExposureStep {
+	const s = String(value ?? "").trim().toLowerCase();
+	return (EXPOSURE_STEPS as readonly string[]).includes(s) ? (s as ExposureStep) : "";
 }
 
 function normalizeOutcome(value: unknown): Outcome | "" {

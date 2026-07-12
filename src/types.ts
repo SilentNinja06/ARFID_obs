@@ -20,15 +20,53 @@ export const OUTCOME_LABELS: Record<Outcome, string> = {
 	avoided: "Avoided",
 };
 
+export const MEAL_TYPES = ["breakfast", "lunch", "dinner", "snack", "drink"] as const;
+export type MealType = (typeof MEAL_TYPES)[number] | "";
+
+export const MEAL_LABELS: Record<Exclude<MealType, "">, string> = {
+	breakfast: "Breakfast",
+	lunch: "Lunch",
+	dinner: "Dinner",
+	snack: "Snack",
+	drink: "Drink",
+};
+
+/** Exposure ladder: any step counts, in roughly increasing order. */
+export const EXPOSURE_STEPS = ["looked", "smelled", "touched", "tasted", "bite", "portion"] as const;
+export type ExposureStep = (typeof EXPOSURE_STEPS)[number] | "";
+
+export const EXPOSURE_STEP_LABELS: Record<Exclude<ExposureStep, "">, string> = {
+	looked: "Looked at it",
+	smelled: "Smelled it",
+	touched: "Touched it",
+	tasted: "Tasted it",
+	bite: "Took a bite",
+	portion: "Ate a portion",
+};
+
 export type StrategyWorked = true | false | "n/a";
+
+/** Per-food companion notes: eating rituals, orders that work, recipes. */
+export const NOTE_KINDS = ["ritual", "order", "recipe"] as const;
+export type NoteKind = (typeof NOTE_KINDS)[number];
+
+export const NOTE_KIND_LABELS: Record<NoteKind, string> = {
+	ritual: "Ritual",
+	order: "Order that works",
+	recipe: "Recipe",
+};
 
 export interface FoodEntry {
 	file: TFile;
 	date: string; // YYYY-MM-DD
 	time: string; // HH:mm
 	food: string;
+	meal: MealType;
 	status: FoodStatus;
 	outcome: Outcome | "";
+	exposure: boolean;
+	exposureStep: ExposureStep;
+	statusReason: string;
 	textureNotes: string;
 	context: string[]; // comma-separated in frontmatter
 	strategies: string[]; // comma-separated in frontmatter (strategy_used)
@@ -45,11 +83,27 @@ export interface FoodSummary {
 	lastLogged: string;
 }
 
+export interface SymptomEntry {
+	file: TFile;
+	date: string;
+	time: string;
+	symptoms: string[];
+}
+
+export interface FoodNote {
+	file: TFile;
+	food: string;
+	key: string; // normalized food name
+	kind: NoteKind;
+	date: string;
+}
+
 export interface StatusShift {
 	food: string;
 	from: FoodStatus;
 	to: FoodStatus;
 	date: string;
+	reason: string;
 }
 
 export interface StrategyStat {
@@ -65,6 +119,10 @@ export interface ArfidSettings {
 	exportsFolder: string;
 	knownStrategies: string[];
 	knownContexts: string[];
+	knownSymptoms: string[];
+	kindnessReminders: string[];
+	environmentChecklist: string[];
+	exposureChecklist: string[];
 	dailyNoteLinking: boolean;
 	dailyNoteMarker: string;
 	dailyNoteHeading: string;
@@ -96,7 +154,43 @@ export const DEFAULT_SETTINGS: ArfidSettings = {
 		"rushed",
 		"calm",
 	],
-	dailyNoteLinking: false,
+	knownSymptoms: [
+		"brain fog",
+		"jitters / shakiness",
+		"lightheaded / dizzy",
+		"headache",
+		"nausea",
+		"fatigue / low energy",
+		"irritability",
+		"trouble focusing",
+		"stomach pain",
+		"weakness",
+	],
+	kindnessReminders: [
+		"Eating anything is better than eating nothing.",
+		"A hard eating day doesn't undo your progress.",
+		"You're allowed to eat the same safe food again. That's what it's for.",
+		"Safe foods are tools, not failures.",
+		"Be as kind to yourself as you'd be to a friend struggling with this.",
+		"Your body deserves fuel even on days it feels hard to give it.",
+	],
+	environmentChecklist: [
+		"Soften the lighting",
+		"Reduce noise — quiet room or headphones",
+		"Sit somewhere comfortable",
+		"Put on a familiar show or video",
+		"Have water or a safe drink within reach",
+		"Remove time pressure — nothing else needs to happen right now",
+	],
+	exposureChecklist: [
+		"Pick one small step — looking, smelling, or touching counts",
+		"Keep a safe food on the plate too",
+		"You can stop at any time — stopping is not failure",
+		"Tasting and spitting out still counts as progress",
+		"Rate how it went after, not during",
+		"Note your next step while it's fresh",
+	],
+	dailyNoteLinking: true,
 	dailyNoteMarker: "%% arfid-log %%",
 	dailyNoteHeading: "Food log",
 };
@@ -115,4 +209,13 @@ export function splitList(value: unknown): string[] {
 
 export function normalizeFoodKey(name: string): string {
 	return name.trim().toLowerCase();
+}
+
+/** Guess the meal type from the time of day, so quick logging needs one less tap. */
+export function guessMealType(d: Date): MealType {
+	const h = d.getHours();
+	if (h >= 5 && h < 11) return "breakfast";
+	if (h >= 11 && h < 15) return "lunch";
+	if (h >= 17 && h < 22) return "dinner";
+	return "snack";
 }

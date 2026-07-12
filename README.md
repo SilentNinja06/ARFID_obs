@@ -34,9 +34,35 @@ daily-note linking, inline SVG charts, and the same release setup.
   heading, and only appending at the end as a last resort. Missing daily notes
   are seeded from the Daily Notes core plugin's template. Structured templates
   are never disturbed — only the plugin's own log lines are reordered.
-- **Export** — CSV of all entries and a clinician-ready markdown summary
-  (foods by status, status changes, strategy table, entries per month, full
-  appendix), written into a configurable exports folder.
+- **"I'm struggling" support screen** (ribbon heart icon / command) — for the
+  moments when eating anything feels hard: a kindness reminder, three
+  low-pressure safe-food options weighted toward what has gone down well
+  before (tap one to log it, with its ritual one tap away if it has one), and
+  an environment checklist. Closing it without logging is always fine.
+- **Exposure logging** — a dedicated flow for fear-food exposures: your
+  critical-reminders checklist on screen during the exposure, an exposure
+  ladder (looked → smelled → touched → tasted → bite → portion; any step
+  counts), environment/context chips, strategies, and a freeform "how did it
+  go" saved into the note body.
+- **Status changes with reasons** — change a food's status in two taps (from
+  the food library, a command, or just by logging), with a "what changed?"
+  prompt so the specific thought behind every gained or lost food is
+  documented. Reasons appear in the status shift tracker and exports.
+- **Symptom tracking** — log ARFID-related symptoms (brain fog, jitters,
+  lightheadedness, headaches…) as one-tap chips backed by an auto-growing
+  list. Frequency bars on the Patterns tab, own CSV, and a summary section.
+- **Rituals, orders, and recipes** — attach companion notes to any food: the
+  exact eating ritual that makes it work, the precise restaurant order, or a
+  recipe that earned its way into the safe list. Shown in the food library,
+  offered on the struggling screen, and listed in the summary export.
+- **Meal types** — entries carry breakfast/lunch/dinner/snack/drink (guessed
+  from the time of day, one tap to change), so the daily note reads as a real
+  food diary and the summary can break meals down by type.
+- **Export** — CSV of all entries (plus a symptoms CSV) and a clinician-ready
+  markdown summary (foods by status, status changes with reasons, exposure
+  practice, symptoms, strategy table, meals by type, rituals/orders/recipes,
+  entries per month, full appendix), written into a configurable exports
+  folder.
 
 ## Data storage
 
@@ -48,8 +74,12 @@ type: food-entry
 date: 2026-07-11
 time: "18:30"
 food: "scrambled eggs"
+meal: dinner              # breakfast | lunch | dinner | snack | drink | ""
 status: trying            # safe | trying | fear | recently-expanded
-outcome: partial          # full | partial | refused | avoided
+outcome: partial          # full | partial | refused | avoided | ""
+exposure: false           # true when logged through the exposure flow
+exposure_step: ""         # looked | smelled | touched | tasted | bite | portion
+status_reason: ""         # why this food's status changed, when it did
 texture_notes: ""
 context: "home, family meal"
 strategy_used: "small portion first"
@@ -58,9 +88,14 @@ tags: []
 ---
 ```
 
-Entries are discovered by their `type: food-entry` frontmatter, **not** by
-folder path, so notes can be reorganized freely. Data stays portable,
-greppable, and Dataview-queryable even without the plugin.
+Symptom logs are their own notes (`type: symptom-entry` with a `symptoms:`
+list), and rituals/orders/recipes are per-food companion notes
+(`type: food-note` with `note_kind: ritual | order | recipe`, details in the
+body).
+
+All notes are discovered by their `type` frontmatter, **not** by folder path,
+so they can be reorganized freely. Data stays portable, greppable, and
+Dataview-queryable even without the plugin.
 
 ## Install
 

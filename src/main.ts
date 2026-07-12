@@ -3,6 +3,11 @@ import { ArfidSettings, DEFAULT_SETTINGS } from "./types";
 import { ArfidSettingTab } from "./settings";
 import { EntryStore } from "./store";
 import { QuickLogModal } from "./quicklog";
+import { ExposureModal } from "./exposure";
+import { StrugglingModal } from "./struggling";
+import { SymptomModal } from "./symptoms";
+import { FoodNoteModal } from "./foodnote";
+import { StatusChangeModal } from "./statuschange";
 import { ArfidDashboardView, VIEW_TYPE_ARFID } from "./dashboard";
 import { exportCsv, exportSummary } from "./export";
 
@@ -19,6 +24,9 @@ export default class ArfidTrackerPlugin extends Plugin {
 
 		this.addRibbonIcon("utensils", "Log a food", () => this.openQuickLog());
 		this.addRibbonIcon("apple", "Open ARFID dashboard", () => void this.openDashboard());
+		this.addRibbonIcon("heart-handshake", "I'm struggling to eat", () =>
+			new StrugglingModal(this.app, this).open()
+		);
 
 		this.addCommand({
 			id: "quick-log",
@@ -29,6 +37,31 @@ export default class ArfidTrackerPlugin extends Plugin {
 			id: "open-dashboard",
 			name: "Open dashboard",
 			callback: () => void this.openDashboard(),
+		});
+		this.addCommand({
+			id: "struggling",
+			name: "I'm struggling — show safe options",
+			callback: () => new StrugglingModal(this.app, this).open(),
+		});
+		this.addCommand({
+			id: "log-exposure",
+			name: "Log an exposure",
+			callback: () => new ExposureModal(this.app, this).open(),
+		});
+		this.addCommand({
+			id: "log-symptoms",
+			name: "Log symptoms",
+			callback: () => new SymptomModal(this.app, this).open(),
+		});
+		this.addCommand({
+			id: "change-food-status",
+			name: "Change a food's status",
+			callback: () => new StatusChangeModal(this.app, this).open(),
+		});
+		this.addCommand({
+			id: "add-food-note",
+			name: "Add a ritual, order, or recipe for a food",
+			callback: () => new FoodNoteModal(this.app, this).open(),
 		});
 		this.addCommand({
 			id: "export-csv",
@@ -71,7 +104,9 @@ export default class ArfidTrackerPlugin extends Plugin {
 
 	private maybeRefresh(path: string): void {
 		const fm = this.app.metadataCache.getCache(path)?.frontmatter;
-		if (fm?.type === "food-entry") this.scheduleRefresh();
+		if (fm?.type === "food-entry" || fm?.type === "symptom-entry" || fm?.type === "food-note") {
+			this.scheduleRefresh();
+		}
 	}
 
 	private scheduleRefresh(): void {

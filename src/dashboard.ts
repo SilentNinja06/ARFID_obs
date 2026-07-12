@@ -1,8 +1,13 @@
 import { ItemView, WorkspaceLeaf } from "obsidian";
 import {
+	EXPOSURE_STEP_LABELS,
+	ExposureStep,
 	FOOD_STATUSES,
 	FoodEntry,
+	FoodNote,
 	FoodSummary,
+	NOTE_KIND_LABELS,
+	NOTE_KINDS,
 	STATUS_LABELS,
 	StatusShift,
 } from "./types";
@@ -10,6 +15,11 @@ import { renderBars, renderLineChart, SeriesPoint } from "./charts";
 import { exportCsv, exportSummary } from "./export";
 import { isoDate } from "./store";
 import { QuickLogModal } from "./quicklog";
+import { ExposureModal } from "./exposure";
+import { StrugglingModal } from "./struggling";
+import { SymptomModal } from "./symptoms";
+import { FoodNoteModal } from "./foodnote";
+import { StatusChangeModal } from "./statuschange";
 import type ArfidTrackerPlugin from "./main";
 
 export const VIEW_TYPE_ARFID = "arfid-dashboard";
@@ -54,7 +64,7 @@ export class ArfidDashboardView extends ItemView {
 		const tabs: [Tab, string][] = [
 			["overview", "Overview"],
 			["foods", "Foods"],
-			["strategies", "Strategies"],
+			["strategies", "Patterns"],
 		];
 		for (const [tab, label] of tabs) {
 			const btn = nav.createEl("button", { cls: "arfid-tab", text: label });
@@ -86,6 +96,16 @@ export class ArfidDashboardView extends ItemView {
 			(s.from === "trying" && (s.to === "safe" || s.to === "recently-expanded")) ||
 			s.to === "recently-expanded";
 		const recentExpansions = shifts.filter((s) => s.date >= cutoff30 && expansionShift(s)).length;
+		const recentExposures = entries.filter((e) => e.exposure && e.date >= cutoff30).length;
+
+		// quick actions for hard moments — reachable in two taps from anywhere
+		const actions = body.createDiv({ cls: "arfid-quick-actions" });
+		const struggling = actions.createEl("button", { cls: "arfid-chip arfid-action-chip", text: "I'm struggling" });
+		struggling.addEventListener("click", () => new StrugglingModal(this.app, this.plugin).open());
+		const exposure = actions.createEl("button", { cls: "arfid-chip arfid-action-chip", text: "Log an exposure" });
+		exposure.addEventListener("click", () => new ExposureModal(this.app, this.plugin).open());
+		const symptoms = actions.createEl("button", { cls: "arfid-chip arfid-action-chip", text: "Log symptoms" });
+		symptoms.addEventListener("click", () => new SymptomModal(this.app, this.plugin).open());
 
 		// summary cards
 		const cards = body.createDiv({ cls: "arfid-cards" });
@@ -99,6 +119,7 @@ export class ArfidDashboardView extends ItemView {
 		card("Trying", foods.filter((f) => f.currentStatus === "trying").length, "arfid-text-trying");
 		card("Fear foods", foods.filter((f) => f.currentStatus === "fear").length, "arfid-text-fear");
 		card("Expansions · 30d", recentExpansions, "arfid-text-expanded");
+		card("Exposures · 30d", recentExposures);
 
 		// trend chart
 		const trendSection = body.createDiv({ cls: "arfid-section" });
@@ -130,7 +151,8 @@ export class ArfidDashboardView extends ItemView {
 		} else {
 			const list = shiftSection.createDiv({ cls: "arfid-shift-list" });
 			for (const sh of [...shifts].reverse().slice(0, 15)) {
-				const row = list.createDiv({ cls: "arfid-shift-row" });
+				const item = list.createDiv({ cls: "arfid-shift-item" });
+				const row = item.createDiv({ cls: "arfid-shift-row" });
 				row.createSpan({ cls: "arfid-shift-date", text: sh.date });
 				row.createSpan({ cls: "arfid-shift-food", text: sh.food });
 				const change = row.createSpan({ cls: "arfid-shift-change" });
@@ -138,6 +160,9 @@ export class ArfidDashboardView extends ItemView {
 				change.createSpan({ text: `${STATUS_LABELS[sh.from]} → ` });
 				change.createSpan({ cls: `arfid-status-dot arfid-status-${sh.to}` });
 				change.createSpan({ text: STATUS_LABELS[sh.to] });
+				if (sh.reason) {
+					item.createDiv({ cls: "arfid-shift-reason", text: `“${sh.reason}”` });
+				}
 			}
 		}
 
@@ -165,6 +190,12 @@ export class ArfidDashboardView extends ItemView {
 	// ---------------------------------------------------------------- foods
 
 	private renderFoods(body: HTMLElement, foods: FoodSummary[]): void {
+		const notesByFood = new Map<string, FoodNote[]>();
+		for (const n of this.plugin.store.getFoodNotes()) {
+			const list = notesByFood.get(n.key) ?? [];
+			list.push(n);
+			notesByFood.set(n.key, list);
+		}
 		const search = body.createEl("input", {
 			cls: "arfid-input arfid-search",
 			attr: { type: "search", placeholder: "Search foods…" },
@@ -195,6 +226,15 @@ export class ArfidDashboardView extends ItemView {
 					const row = section.createDiv({ cls: "arfid-food-row" });
 					const main = row.createDiv({ cls: "arfid-food-main" });
 					main.createSpan({ cls: "arfid-food-name", text: f.name });
+					const notes = notesByFood.get(f.key) ?? [];
+					if (notes.length > 0) {
+						const badges = main.createSpan({ cls: "arfid-note-badges" });
+						for (const kind of NOTE_KINDS) {
+							if (notes.some((n) => n.kind === kind)) {
+								badges.createSpan({ cls: "arfid-note-badge", text: NOTE_KIND_LABELS[kind].split(" ")[0].toLowerCase() });
+							}
+						}
+					}
 					main.createSpan({
 						cls: "arfid-food-meta",
 						text: `${f.entries.length}× · last ${f.lastLogged}`,
@@ -204,8 +244,19 @@ export class ArfidDashboardView extends ItemView {
 						renderGroups();
 					});
 					if (this.expandedFood === f.key) {
-						const history = row.createDiv({ cls: "arfid-food-history" });
-						for (const e of [...f.entries].reverse()) this.renderEntryRow(history, e, false);
+						const detail = row.createDiv({ cls: "arfid-food-history" });
+						const actionRow = detail.createDiv({ cls: "arfid-chip-row" });
+						const changeBtn = actionRow.createEl("button", { cls: "arfid-chip", text: "Change status" });
+						changeBtn.addEventListener("click", () => new StatusChangeModal(this.app, this.plugin, f.name).open());
+						const noteBtn = actionRow.createEl("button", { cls: "arfid-chip", text: "+ Ritual / order / recipe" });
+						noteBtn.addEventListener("click", () => new FoodNoteModal(this.app, this.plugin, f.name).open());
+						for (const n of notes) {
+							const noteRow = detail.createDiv({ cls: "arfid-entry-row" });
+							noteRow.createSpan({ cls: "arfid-note-badge", text: NOTE_KIND_LABELS[n.kind].toLowerCase() });
+							noteRow.createSpan({ cls: "arfid-entry-main", text: n.file.basename });
+							noteRow.addEventListener("click", () => void this.app.workspace.getLeaf(false).openFile(n.file));
+						}
+						for (const e of [...f.entries].reverse()) this.renderEntryRow(detail, e, false);
 					}
 				}
 			}
@@ -236,6 +287,19 @@ export class ArfidDashboardView extends ItemView {
 			}),
 			"No strategies logged yet — add them from the quick-log form under “Add details”."
 		);
+
+		const symptomStats = this.plugin.store.getSymptomStats();
+		const symptomSection = body.createDiv({ cls: "arfid-section" });
+		symptomSection.createEl("h3", { text: "Symptoms" });
+		symptomSection.createDiv({
+			cls: "arfid-hint",
+			text: "How often each symptom has been logged, all time.",
+		});
+		renderBars(
+			symptomSection,
+			symptomStats.map((s) => ({ label: s.name, value: s.count })),
+			"No symptoms logged yet — use “Log symptoms” on the Overview tab when they show up."
+		);
 	}
 
 	// ------------------------------------------------------------- shared
@@ -246,7 +310,13 @@ export class ArfidDashboardView extends ItemView {
 		const main = row.createSpan({ cls: "arfid-entry-main" });
 		main.createSpan({ cls: `arfid-status-dot arfid-status-${e.status}` });
 		main.createSpan({ text: showFood ? e.food : STATUS_LABELS[e.status] });
-		if (e.outcome) row.createSpan({ cls: "arfid-entry-outcome", text: e.outcome });
+		if (e.exposure) {
+			const step = e.exposureStep ? EXPOSURE_STEP_LABELS[e.exposureStep as Exclude<ExposureStep, "">].toLowerCase() : "";
+			row.createSpan({ cls: "arfid-entry-outcome", text: step ? `exposure · ${step}` : "exposure" });
+		} else {
+			const bits = [e.meal, e.outcome].filter((b) => b);
+			if (bits.length > 0) row.createSpan({ cls: "arfid-entry-outcome", text: bits.join(" · ") });
+		}
 		row.addEventListener("click", () => void this.app.workspace.getLeaf(false).openFile(e.file));
 	}
 

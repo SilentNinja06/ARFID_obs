@@ -119,5 +119,63 @@ export class ArfidSettingTab extends PluginSettingTab {
 				});
 				t.inputEl.rows = 6;
 			});
+
+		new Setting(containerEl)
+			.setName("Known symptoms")
+			.setDesc("One per line. New symptoms typed during logging are added here automatically.")
+			.addTextArea((t) => {
+				t.setValue(this.plugin.settings.knownSymptoms.join("\n")).onChange(async (v) => {
+					this.plugin.settings.knownSymptoms = v
+						.split("\n")
+						.map((s) => s.trim())
+						.filter((s) => s.length > 0);
+					await this.plugin.saveSettings();
+				});
+				t.inputEl.rows = 6;
+			});
+
+		new Setting(containerEl).setName("Support & reminders").setHeading();
+
+		new Setting(containerEl)
+			.setName("Kindness reminders")
+			.setDesc("One per line. A random one is shown on the “I'm struggling” screen.")
+			.addTextArea((t) => {
+				t.setValue(this.plugin.settings.kindnessReminders.join("\n")).onChange(async (v) => {
+					this.plugin.settings.kindnessReminders = v
+						.split("\n")
+						.map((s) => s.trim())
+						.filter((s) => s.length > 0);
+					await this.plugin.saveSettings();
+				});
+				t.inputEl.rows = 6;
+			});
+
+		new Setting(containerEl)
+			.setName("Environment checklist")
+			.setDesc("One per line. Shown on the “I'm struggling” screen — things that make eating easier.")
+			.addTextArea((t) => {
+				t.setValue(this.plugin.settings.environmentChecklist.join("\n")).onChange(async (v) => {
+					this.plugin.settings.environmentChecklist = v
+						.split("\n")
+						.map((s) => s.trim())
+						.filter((s) => s.length > 0);
+					await this.plugin.saveSettings();
+				});
+				t.inputEl.rows = 6;
+			});
+
+		new Setting(containerEl)
+			.setName("Exposure checklist")
+			.setDesc("One per line. Shown at the top of the exposure logging screen — the critical things to remember during an exposure.")
+			.addTextArea((t) => {
+				t.setValue(this.plugin.settings.exposureChecklist.join("\n")).onChange(async (v) => {
+					this.plugin.settings.exposureChecklist = v
+						.split("\n")
+						.map((s) => s.trim())
+						.filter((s) => s.length > 0);
+					await this.plugin.saveSettings();
+				});
+				t.inputEl.rows = 6;
+			});
 	}
 }

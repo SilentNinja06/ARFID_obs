@@ -1,6 +1,18 @@
 import { App, Notice, TFile, TFolder, normalizePath } from "obsidian";
 import { EntryStore, isoDate } from "./store";
-import { ArfidSettings, FOOD_STATUSES, FoodEntry, STATUS_LABELS, StatusShift } from "./types";
+import {
+	ArfidSettings,
+	EXPOSURE_STEP_LABELS,
+	EXPOSURE_STEPS,
+	ExposureStep,
+	FOOD_STATUSES,
+	FoodEntry,
+	MEAL_LABELS,
+	MEAL_TYPES,
+	NOTE_KIND_LABELS,
+	STATUS_LABELS,
+	SymptomEntry,
+} from "./types";
 
 function csvCell(value: string): string {
 	if (/[",\n]/.test(value)) return '"' + value.replace(/"/g, '""') + '"';
@@ -12,8 +24,12 @@ export function buildCsv(entries: FoodEntry[]): string {
 		"date",
 		"time",
 		"food",
+		"meal",
 		"status",
 		"outcome",
+		"exposure",
+		"exposure_step",
+		"status_reason",
 		"texture_notes",
 		"context",
 		"strategy_used",
@@ -26,8 +42,12 @@ export function buildCsv(entries: FoodEntry[]): string {
 			e.date,
 			e.time,
 			e.food,
+			e.meal,
 			e.status,
 			e.outcome,
+			e.exposure ? "true" : "false",
+			e.exposureStep,
+			e.statusReason.replace(/\r?\n/g, " "),
 			e.textureNotes.replace(/\r?\n/g, " "),
 			e.context.join(", "),
 			e.strategies.join(", "),
@@ -38,6 +58,12 @@ export function buildCsv(entries: FoodEntry[]): string {
 			.map(csvCell)
 			.join(",")
 	);
+	return [header.join(","), ...rows].join("\n") + "\n";
+}
+
+export function buildSymptomCsv(entries: SymptomEntry[]): string {
+	const header = ["date", "time", "symptoms", "file"];
+	const rows = entries.map((e) => [e.date, e.time, e.symptoms.join(", "), e.file.path].map(csvCell).join(","));
 	return [header.join(","), ...rows].join("\n") + "\n";
 }
 
@@ -86,10 +112,76 @@ export function buildMarkdownSummary(store: EntryStore): string {
 	if (shifts.length === 0) {
 		lines.push("No status changes recorded yet.");
 	} else {
-		lines.push(`| Date | Food | Change |`);
-		lines.push(`| --- | --- | --- |`);
+		lines.push(`| Date | Food | Change | Why |`);
+		lines.push(`| --- | --- | --- | --- |`);
 		for (const sh of [...shifts].reverse()) {
-			lines.push(`| ${sh.date} | ${sh.food} | ${STATUS_LABELS[sh.from]} → ${STATUS_LABELS[sh.to]} |`);
+			lines.push(
+				`| ${sh.date} | ${sh.food} | ${STATUS_LABELS[sh.from]} → ${STATUS_LABELS[sh.to]} | ${sh.reason.replace(/\r?\n/g, " ") || "—"} |`
+			);
+		}
+	}
+	lines.push("");
+
+	lines.push(`## Exposure practice`);
+	lines.push("");
+	const exposures = entries.filter((e) => e.exposure);
+	if (exposures.length === 0) {
+		lines.push("No exposures logged yet.");
+	} else {
+		const cutoff30 = isoDate(new Date(Date.now() - 30 * 86400_000));
+		lines.push(`${exposures.length} exposures logged, ${exposures.filter((e) => e.date >= cutoff30).length} in the last 30 days.`);
+		lines.push("");
+		lines.push(`| Step reached | Count |`);
+		lines.push(`| --- | ---: |`);
+		for (const step of EXPOSURE_STEPS) {
+			const count = exposures.filter((e) => e.exposureStep === step).length;
+			if (count > 0) lines.push(`| ${EXPOSURE_STEP_LABELS[step]} | ${count} |`);
+		}
+		const unstepped = exposures.filter((e) => !e.exposureStep).length;
+		if (unstepped > 0) lines.push(`| (step not recorded) | ${unstepped} |`);
+	}
+	lines.push("");
+
+	lines.push(`## Symptoms`);
+	lines.push("");
+	const symptomEntries = store.getSymptomEntries();
+	const symptomStats = store.getSymptomStats(symptomEntries);
+	if (symptomStats.length === 0) {
+		lines.push("No symptoms logged yet.");
+	} else {
+		lines.push(`${symptomEntries.length} symptom logs.`);
+		lines.push("");
+		lines.push(`| Symptom | Times logged |`);
+		lines.push(`| --- | ---: |`);
+		for (const s of symptomStats) lines.push(`| ${s.name} | ${s.count} |`);
+	}
+	lines.push("");
+
+	lines.push(`## Meals by type`);
+	lines.push("");
+	const withMeal = entries.filter((e) => e.meal);
+	if (withMeal.length === 0) {
+		lines.push("No entries with a meal type yet.");
+	} else {
+		lines.push(`| Meal | Entries |`);
+		lines.push(`| --- | ---: |`);
+		for (const m of MEAL_TYPES) {
+			const count = withMeal.filter((e) => e.meal === m).length;
+			if (count > 0) lines.push(`| ${MEAL_LABELS[m]} | ${count} |`);
+		}
+	}
+	lines.push("");
+
+	lines.push(`## Rituals, orders, and recipes`);
+	lines.push("");
+	const foodNotes = store.getFoodNotes();
+	if (foodNotes.length === 0) {
+		lines.push("None recorded yet.");
+	} else {
+		lines.push(`| Food | Kind | Note |`);
+		lines.push(`| --- | --- | --- |`);
+		for (const n of foodNotes) {
+			lines.push(`| ${n.food} | ${NOTE_KIND_LABELS[n.kind]} | [[${n.file.basename}]] |`);
 		}
 	}
 	lines.push("");
@@ -132,11 +224,16 @@ export function buildMarkdownSummary(store: EntryStore): string {
 	if (entries.length === 0) {
 		lines.push("No entries yet.");
 	} else {
-		lines.push(`| Date | Time | Food | Status | Outcome | Strategies | Context |`);
-		lines.push(`| --- | --- | --- | --- | --- | --- | --- |`);
+		lines.push(`| Date | Time | Food | Kind | Status | Outcome | Strategies | Context |`);
+		lines.push(`| --- | --- | --- | --- | --- | --- | --- | --- |`);
 		for (const e of entries) {
+			const kind = e.exposure
+				? `exposure${e.exposureStep ? ` (${EXPOSURE_STEP_LABELS[e.exposureStep as Exclude<ExposureStep, "">].toLowerCase()})` : ""}`
+				: e.tags.includes("status-change")
+					? "status change"
+					: e.meal || "—";
 			lines.push(
-				`| ${e.date} | ${e.time} | ${e.food} | ${STATUS_LABELS[e.status]} | ${e.outcome || "—"} | ${e.strategies.join(", ") || "—"} | ${e.context.join(", ") || "—"} |`
+				`| ${e.date} | ${e.time} | ${e.food} | ${kind} | ${STATUS_LABELS[e.status]} | ${e.outcome || "—"} | ${e.strategies.join(", ") || "—"} | ${e.context.join(", ") || "—"} |`
 			);
 		}
 	}
@@ -161,7 +258,13 @@ async function writeExport(app: App, settings: ArfidSettings, filename: string, 
 export async function exportCsv(app: App, settings: ArfidSettings, store: EntryStore): Promise<void> {
 	const entries = store.getEntries();
 	const file = await writeExport(app, settings, `arfid-entries-${isoDate(new Date())}.csv`, buildCsv(entries));
-	new Notice(`Exported ${entries.length} entries to ${file.path}`);
+	const symptoms = store.getSymptomEntries();
+	if (symptoms.length > 0) {
+		await writeExport(app, settings, `arfid-symptoms-${isoDate(new Date())}.csv`, buildSymptomCsv(symptoms));
+	}
+	new Notice(
+		`Exported ${entries.length} entries${symptoms.length > 0 ? ` and ${symptoms.length} symptom logs` : ""} to ${file.parent?.path ?? file.path}`
+	);
 }
 
 export async function exportSummary(app: App, settings: ArfidSettings, store: EntryStore): Promise<void> {

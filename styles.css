@@ -462,6 +462,127 @@
 	font-weight: 600;
 }
 
+/* ------------------------------------------------------- support screens */
+
+.arfid-quick-actions {
+	display: flex;
+	gap: 0.4em;
+	flex-wrap: wrap;
+	margin-bottom: 0.8em;
+}
+
+.arfid-action-chip {
+	font-weight: 600;
+}
+
+.arfid-kindness {
+	background: var(--background-secondary);
+	border-left: 3px solid var(--arfid-accent);
+	border-radius: var(--radius-s, 6px);
+	padding: 0.7em 0.9em;
+	margin-bottom: 0.9em;
+	font-style: italic;
+	color: var(--text-normal);
+}
+
+.arfid-option-btn {
+	display: flex;
+	align-items: center;
+	gap: 0.6em;
+	width: 100%;
+	min-height: 56px;
+	margin-bottom: 0.45em;
+	padding: 0.5em 0.9em;
+	border-radius: var(--radius-m, 8px);
+	border: 1px solid var(--background-modifier-border);
+	background: var(--background-secondary);
+	color: var(--text-normal);
+	cursor: pointer;
+	box-shadow: none;
+	text-align: left;
+}
+
+.arfid-option-text {
+	display: flex;
+	flex-direction: column;
+	gap: 0.1em;
+	min-width: 0;
+}
+
+.arfid-option-name {
+	font-weight: 600;
+	font-size: 1.05em;
+}
+
+.arfid-option-meta {
+	color: var(--text-muted);
+	font-size: 0.8em;
+}
+
+.arfid-ritual-link {
+	margin: -0.15em 0 0.55em 2.2em;
+	min-height: 36px;
+	font-size: 0.85em;
+	color: var(--text-muted);
+}
+
+.arfid-checklist {
+	background: var(--background-secondary);
+	border-radius: var(--radius-m, 8px);
+	padding: 0.2em 0.8em 0.6em;
+	margin: 0.8em 0;
+}
+
+.arfid-checklist-row {
+	display: flex;
+	align-items: center;
+	gap: 0.6em;
+	min-height: 40px;
+	cursor: pointer;
+	color: var(--text-normal);
+	font-size: 0.92em;
+}
+
+.arfid-checklist-row input[type="checkbox"] {
+	width: 18px;
+	height: 18px;
+	flex-shrink: 0;
+}
+
+.arfid-soft-footer {
+	margin-top: 1em;
+	text-align: center;
+}
+
+.arfid-shift-item {
+	margin-bottom: 0.25em;
+}
+
+.arfid-shift-reason {
+	color: var(--text-muted);
+	font-size: 0.85em;
+	font-style: italic;
+	margin: -0.2em 0 0.4em 8em;
+}
+
+.arfid-note-badges {
+	display: inline-flex;
+	gap: 0.3em;
+	flex-shrink: 0;
+}
+
+.arfid-note-badge {
+	display: inline-block;
+	padding: 0.1em 0.55em;
+	border-radius: 10px;
+	background: var(--background-secondary);
+	border: 1px solid var(--background-modifier-border);
+	color: var(--text-muted);
+	font-size: 0.75em;
+	white-space: nowrap;
+	flex-shrink: 0;
+}
+
 /* --------------------------------------------------------------- mobile */
 
 .is-mobile .arfid-quicklog .arfid-chip,

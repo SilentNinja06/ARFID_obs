@@ -24,13 +24,19 @@ export interface EntryFields {
 	date: string;
 	time: string;
 	food: string;
+	meal: string;
 	status: string;
 	outcome: string;
+	exposure: boolean;
+	exposureStep: string;
+	statusReason: string;
 	textureNotes: string;
 	context: string[];
 	strategies: string[];
 	strategyWorked: true | false | "n/a";
 	tags: string[];
+	/** Freeform thoughts, written as the note body below the frontmatter. */
+	body?: string;
 }
 
 export function buildEntryNote(f: EntryFields): string {
@@ -42,8 +48,12 @@ export function buildEntryNote(f: EntryFields): string {
 		`date: ${f.date}`,
 		`time: "${f.time}"`,
 		`food: ${yamlString(f.food)}`,
+		`meal: ${f.meal ? f.meal : '""'}`,
 		`status: ${f.status}`,
 		`outcome: ${f.outcome ? f.outcome : '""'}`,
+		`exposure: ${f.exposure ? "true" : "false"}`,
+		`exposure_step: ${f.exposureStep ? f.exposureStep : '""'}`,
+		`status_reason: ${yamlString(f.statusReason)}`,
 		`texture_notes: ${yamlString(f.textureNotes)}`,
 		`context: ${yamlString(f.context.join(", "))}`,
 		`strategy_used: ${yamlString(f.strategies.join(", "))}`,
@@ -52,7 +62,36 @@ export function buildEntryNote(f: EntryFields): string {
 		"---",
 		"",
 	];
-	return lines.join("\n");
+	const body = (f.body ?? "").trim();
+	return lines.join("\n") + (body ? "\n" + body + "\n" : "");
+}
+
+export function buildSymptomNote(date: string, time: string, symptoms: string[], body: string): string {
+	const lines = [
+		"---",
+		"type: symptom-entry",
+		`date: ${date}`,
+		`time: "${time}"`,
+		`symptoms: ${yamlString(symptoms.join(", "))}`,
+		"---",
+		"",
+	];
+	const b = body.trim();
+	return lines.join("\n") + (b ? "\n" + b + "\n" : "");
+}
+
+export function buildFoodNote(date: string, food: string, kind: string, body: string): string {
+	const lines = [
+		"---",
+		"type: food-note",
+		`date: ${date}`,
+		`food: ${yamlString(food)}`,
+		`note_kind: ${kind}`,
+		"---",
+		"",
+	];
+	const b = body.trim();
+	return lines.join("\n") + (b ? "\n" + b + "\n" : "");
 }
 
 /** Make a food name safe for use inside a filename. */
