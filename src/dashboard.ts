@@ -20,7 +20,7 @@ import { StrugglingModal } from "./struggling";
 import { SymptomModal } from "./symptoms";
 import { FoodNoteModal } from "./foodnote";
 import { StatusChangeModal } from "./statuschange";
-import { AddFoodsModal } from "./addfoods";
+import { AddFoodModal } from "./addfoods";
 import type ArfidTrackerPlugin from "./main";
 
 export const VIEW_TYPE_ARFID = "arfid-dashboard";
@@ -206,8 +206,8 @@ export class ArfidDashboardView extends ItemView {
 			attr: { type: "search", placeholder: "Search foods…" },
 		});
 		search.value = this.foodSearch;
-		const addBtn = topRow.createEl("button", { cls: "arfid-chip", text: "+ Add foods" });
-		addBtn.addEventListener("click", () => new AddFoodsModal(this.app, this.plugin).open());
+		const addBtn = topRow.createEl("button", { cls: "arfid-chip", text: "+ Add food" });
+		addBtn.addEventListener("click", () => new AddFoodModal(this.app, this.plugin).open());
 		const groups = body.createDiv();
 		search.addEventListener("input", () => {
 			this.foodSearch = search.value;

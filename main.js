@@ -1488,6 +1488,115 @@ var StatusChangeModal = class extends import_obsidian8.Modal {
 
 // src/addfoods.ts
 var import_obsidian9 = require("obsidian");
+async function createBaselineEntry(app, plugin, date, time, food, status) {
+  const note = buildEntryNote({
+    date,
+    time,
+    food,
+    meal: "",
+    status,
+    outcome: "",
+    exposure: false,
+    exposureStep: "",
+    statusReason: "",
+    textureNotes: "",
+    context: [],
+    strategies: [],
+    strategyWorked: "n/a",
+    tags: ["baseline"]
+  });
+  await createEntryFile(app, plugin, date, time, food, note);
+}
+var AddFoodModal = class extends import_obsidian9.Modal {
+  constructor(app, plugin) {
+    super(app);
+    this.foods = [];
+    this.foodName = "";
+    this.status = "";
+    this.plugin = plugin;
+  }
+  onOpen() {
+    this.foods = this.plugin.store.getFoods();
+    const { contentEl } = this;
+    contentEl.addClass("arfid-plugin", "arfid-quicklog");
+    this.titleEl.setText("Add a food to your library");
+    contentEl.createDiv({
+      cls: "arfid-hint",
+      text: "Nothing is logged as eaten \u2014 this just adds the food with a status."
+    });
+    const foodInput = contentEl.createEl("input", {
+      cls: "arfid-input",
+      attr: { type: "text", placeholder: "Food name", enterkeyhint: "done" }
+    });
+    this.hintEl = contentEl.createDiv({ cls: "arfid-hint" });
+    foodInput.addEventListener("input", () => {
+      this.foodName = foodInput.value;
+      this.updateExistingHint();
+    });
+    contentEl.createDiv({ cls: "arfid-field-label", text: "Status" });
+    buildChoiceRow(
+      contentEl,
+      FOOD_STATUSES.map((s) => ({ value: s, label: STATUS_LABELS[s], dotClass: `arfid-status-${s}` })),
+      "",
+      (v) => this.status = v
+    );
+    this.saveBtn = contentEl.createEl("button", { cls: "arfid-save-btn", text: "Add food" });
+    this.saveBtn.addEventListener("click", () => void this.save());
+    this.scope.register(["Mod"], "Enter", () => {
+      void this.save();
+      return false;
+    });
+    const bulkLink = contentEl.createEl("button", {
+      cls: "arfid-details-toggle",
+      text: "Add many at once instead"
+    });
+    bulkLink.addEventListener("click", () => {
+      this.close();
+      new AddFoodsModal(this.app, this.plugin).open();
+    });
+    window.setTimeout(() => foodInput.focus(), 50);
+  }
+  known() {
+    return this.foods.find((f) => f.key === normalizeFoodKey(this.foodName));
+  }
+  updateExistingHint() {
+    const known = this.known();
+    if (known) {
+      this.hintEl.setText(
+        `${known.name} is already tracked as ${STATUS_LABELS[known.currentStatus].toLowerCase()} \u2014 saving will open the status change screen instead.`
+      );
+      this.saveBtn.setText("Change its status\u2026");
+    } else {
+      this.hintEl.setText("");
+      this.saveBtn.setText("Add food");
+    }
+  }
+  async save() {
+    const food = this.foodName.trim();
+    if (!food) {
+      new import_obsidian9.Notice("Add a food name first.");
+      return;
+    }
+    const known = this.known();
+    if (known) {
+      this.close();
+      new StatusChangeModal(this.app, this.plugin, known.name).open();
+      return;
+    }
+    if (!this.status) {
+      new import_obsidian9.Notice("Pick a status for it.");
+      return;
+    }
+    const now = /* @__PURE__ */ new Date();
+    await createBaselineEntry(this.app, this.plugin, isoDate(now), isoTime(now), food, this.status);
+    new import_obsidian9.Notice(`Added ${food} as ${STATUS_LABELS[this.status].toLowerCase()}.`);
+    this.close();
+    this.plugin.notifyDataChanged();
+  }
+  onClose() {
+    this.contentEl.empty();
+  }
+};
 var AddFoodsModal = class extends import_obsidian9.Modal {
   constructor(app, plugin) {
     super(app);
@@ -1535,23 +1644,7 @@ var AddFoodsModal = class extends import_obsidian9.Modal {
           skipped.push(food);
           continue;
         }
-        const note = buildEntryNote({
-          date,
-          time,
-          food,
-          meal: "",
-          status,
-          outcome: "",
-          exposure: false,
-          exposureStep: "",
-          statusReason: "",
-          textureNotes: "",
-          context: [],
-          strategies: [],
-          strategyWorked: "n/a",
-          tags: ["baseline"]
-        });
-        await createEntryFile(this.app, this.plugin, date, time, food, note);
+        await createBaselineEntry(this.app, this.plugin, date, time, food, status);
         added++;
       }
     }
@@ -2088,8 +2181,8 @@ var ArfidDashboardView = class extends import_obsidian11.ItemView {
       attr: { type: "search", placeholder: "Search foods\u2026" }
     });
     search.value = this.foodSearch;
-    const addBtn = topRow.createEl("button", { cls: "arfid-chip", text: "+ Add foods" });
-    addBtn.addEventListener("click", () => new AddFoodsModal(this.app, this.plugin).open());
+    const addBtn = topRow.createEl("button", { cls: "arfid-chip", text: "+ Add food" });
+    addBtn.addEventListener("click", () => new AddFoodModal(this.app, this.plugin).open());
     const groups = body.createDiv();
     search.addEventListener("input", () => {
       this.foodSearch = search.value;
@@ -2289,8 +2382,13 @@ var ArfidTrackerPlugin = class extends import_obsidian12.Plugin {
       callback: () => new FoodNoteModal(this.app, this).open()
     });
     this.addCommand({
+      id: "add-food",
+      name: "Add a food to library (without logging a meal)",
+      callback: () => new AddFoodModal(this.app, this).open()
+    });
+    this.addCommand({
       id: "add-foods",
-      name: "Add foods to library (without logging a meal)",
+      name: "Add foods to library in bulk (without logging a meal)",
       callback: () => new AddFoodsModal(this.app, this).open()
     });
     this.addCommand({
