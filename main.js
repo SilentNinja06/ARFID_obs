@@ -2258,6 +2258,22 @@ var ArfidTrackerPlugin = class extends import_obsidian13.Plugin {
     super(...arguments);
     this.settings = DEFAULT_SETTINGS;
     this.refreshTimer = null;
+    /**
+     * Read-only API for companion plugins (e.g. the MERIDIAN dashboard). Delegates
+     * to the existing EntryStore — no separate index. Consumers check `version`
+     * and fall back to markdown parsing if it is absent or mismatched.
+     */
+    this.api = {
+      version: 1,
+      /** Food entries logged on `date` (YYYY-MM-DD), chronological. */
+      getEntriesForDate: (date) => this.store.getEntries().filter((e) => e.date === date).map((e) => ({ date: e.date, time: e.time, food: e.food, meal: e.meal })),
+      /** Compact shape for a dashboard card: today's count and food names. */
+      getTodaySummary: () => {
+        const today = isoDate(/* @__PURE__ */ new Date());
+        const entries = this.store.getEntries().filter((e) => e.date === today);
+        return { date: today, count: entries.length, foods: entries.map((e) => e.food) };
+      }
+    };
   }
   async onload() {
     await this.loadSettings();
