@@ -930,12 +930,14 @@ var ArfidModal = class extends import_obsidian4.Modal {
   constructor(app, plugin, title) {
     super(app);
     this.title = title;
+    this.detachKeyboardHandling = null;
     this.plugin = plugin;
   }
   onOpen() {
     this.contentEl.addClass("arfid-plugin", "arfid-quicklog");
     this.titleEl.setText(this.title);
     this.buildContent();
+    this.enableKeyboardHandling();
   }
   addSaveButton(label, onSave) {
     const btn = this.contentEl.createEl("button", { cls: "arfid-save-btn", text: label });
@@ -946,7 +948,42 @@ var ArfidModal = class extends import_obsidian4.Modal {
     });
     return btn;
   }
+  /** On phones the on-screen keyboard overlays the lower half of the modal
+   * without resizing it, hiding whatever is being typed and the save button.
+   * Track the visual viewport: pad the content by the keyboard's height so
+   * everything can still be scrolled above it, and keep the focused field
+   * scrolled into view while typing. */
+  enableKeyboardHandling() {
+    const vv = window.visualViewport;
+    if (!vv) return;
+    const update = () => {
+      const covered = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
+      this.contentEl.style.paddingBottom = covered > 0 ? `${covered + 16}px` : "";
+      if (covered > 0) window.setTimeout(() => this.scrollFocusedIntoView(), 50);
+    };
+    const onFocusIn = () => {
+      window.setTimeout(() => this.scrollFocusedIntoView(), 250);
+    };
+    vv.addEventListener("resize", update);
+    vv.addEventListener("scroll", update);
+    this.contentEl.addEventListener("focusin", onFocusIn);
+    this.detachKeyboardHandling = () => {
+      vv.removeEventListener("resize", update);
+      vv.removeEventListener("scroll", update);
+      this.contentEl.removeEventListener("focusin", onFocusIn);
+    };
+    update();
+  }
+  scrollFocusedIntoView() {
+    const active = document.activeElement;
+    if ((active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement) && this.contentEl.contains(active)) {
+      active.scrollIntoView({ block: "center", behavior: "smooth" });
+    }
+  }
   onClose() {
+    var _a;
+    (_a = this.detachKeyboardHandling) == null ? void 0 : _a.call(this);
+    this.detachKeyboardHandling = null;
     this.contentEl.empty();
   }
 };

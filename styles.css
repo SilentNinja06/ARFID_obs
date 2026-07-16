@@ -630,3 +630,10 @@
 .is-mobile .arfid-tab {
 	min-height: 48px;
 }
+
+/* the base modal pads the content by the on-screen keyboard's height;
+   make sure that padded content can actually scroll above the keyboard */
+.is-mobile .modal-content.arfid-quicklog {
+	overflow-y: auto;
+	-webkit-overflow-scrolling: touch;
+}
