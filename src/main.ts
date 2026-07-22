@@ -1,5 +1,5 @@
 import { Plugin, WorkspaceLeaf } from "obsidian";
-import { ArfidSettings, DEFAULT_SETTINGS } from "./types";
+import { ArfidSettings, DEFAULT_SETTINGS, isConsumed } from "./types";
 import { ArfidSettingTab } from "./settings";
 import { EntryStore } from "./store";
 import { QuickLogModal } from "./quicklog";
@@ -24,18 +24,41 @@ export default class ArfidTrackerPlugin extends Plugin {
 	 * and fall back to markdown parsing if it is absent or mismatched.
 	 */
 	public api = {
-		version: 1,
-		/** Food entries logged on `date` (YYYY-MM-DD), chronological. */
+		// v2 adds `kind`/`outcome`/`exposure`/`status` to each entry and a
+		// `consumed` flag on the summary, so a dashboard card can tell an eaten
+		// meal apart from a food merely added to the library or a status change
+		// (which must NOT read as "consumed at the time of logging"). v1 consumers
+		// still get `date`/`time`/`food`/`meal` unchanged.
+		version: 2,
+		/** Food entries logged on `date` (YYYY-MM-DD), chronological. `kind` is
+		 * "meal" (eaten/attempted), "exposure", "baseline" (library add — nothing
+		 * eaten), or "status-change" (category moved — nothing eaten). */
 		getEntriesForDate: (date: string) =>
 			this.store
 				.getEntries()
 				.filter((e) => e.date === date)
-				.map((e) => ({ date: e.date, time: e.time, food: e.food, meal: e.meal })),
-		/** Compact shape for a dashboard card: today's count and food names. */
+				.map((e) => ({
+					date: e.date,
+					time: e.time,
+					food: e.food,
+					meal: e.meal,
+					kind: e.kind,
+					outcome: e.outcome,
+					exposure: e.exposure,
+					status: e.status,
+					consumed: isConsumed(e),
+				})),
+		/** Compact shape for a dashboard card: today's count and food names.
+		 * `consumedCount` is how many of those were actually eaten/attempted. */
 		getTodaySummary: () => {
 			const today = isoDate(new Date());
 			const entries = this.store.getEntries().filter((e) => e.date === today);
-			return { date: today, count: entries.length, foods: entries.map((e) => e.food) };
+			return {
+				date: today,
+				count: entries.length,
+				consumedCount: entries.filter(isConsumed).length,
+				foods: entries.map((e) => e.food),
+			};
 		},
 	};
 

@@ -80,6 +80,38 @@ async function renderDailyTemplate(
 		.replace(/{{\s*time(?::([^}]+))?\s*}}/gi, (_, fmt) => now.format(fmt || "HH:mm"));
 }
 
+/** Remove the plugin's own log line(s) that link to `noteBasename` from today's
+ * (or any day's) daily note, so deleting an entry doesn't leave a dangling link.
+ * Best-effort: if the daily note or the line is gone, it simply does nothing. */
+export async function unlinkFromDailyNote(
+	app: App,
+	date: string,
+	noteBasename: string
+): Promise<void> {
+	const opts = getDailyNotesOptions(app);
+	const format = opts.format || "YYYY-MM-DD";
+	const folder = (opts.folder ?? "").trim().replace(/\/+$/, "");
+	const dailyName = moment(date, "YYYY-MM-DD").format(format);
+	const path = normalizePath((folder ? folder + "/" : "") + dailyName + ".md");
+	const file = app.vault.getAbstractFileByPath(path);
+	if (!(file instanceof TFile)) return;
+	await app.vault.process(file, (content) => removeLogLine(content, noteBasename));
+}
+
+/** Drop the plugin's log line(s) whose wikilink targets `noteBasename`. Only
+ * plugin-written lines (`- HH:mm [[…]]`) are considered, so template content is
+ * never touched. Pure, for unit testing. */
+export function removeLogLine(content: string, noteBasename: string): string {
+	const target = noteBasename.trim();
+	const lines = content.split("\n");
+	const kept = lines.filter((l) => {
+		if (!PLUGIN_LINE.test(l)) return true;
+		const m = l.match(/\[\[([^\]|#]+)(?:[|#][^\]]*)?\]\]/);
+		return !(m && m[1].trim() === target);
+	});
+	return kept.join("\n");
+}
+
 export function insertLogLine(
 	content: string,
 	line: string,

@@ -27,7 +27,7 @@ __export(main_exports, {
   default: () => ArfidTrackerPlugin
 });
 module.exports = __toCommonJS(main_exports);
-var import_obsidian13 = require("obsidian");
+var import_obsidian14 = require("obsidian");
 
 // src/types.ts
 var FOOD_STATUSES = [
@@ -215,7 +215,7 @@ var ArfidSettingTab = class extends import_obsidian.PluginSettingTab {
     );
   }
   addListSetting(name, desc, rows, get, set) {
-    new import_obsidian.Setting(this.containerEl).setName(name).setDesc(desc).addTextArea((t) => {
+    new import_obsidian.Setting(this.containerEl).setName(name).setDesc(desc).setClass("arfid-list-setting").addTextArea((t) => {
       t.setValue(get().join("\n")).onChange(async (v) => {
         set(
           v.split("\n").map((s) => s.trim()).filter((s) => s.length > 0)
@@ -690,6 +690,27 @@ async function renderDailyTemplate(app, opts, dailyPath, date) {
   const m = (0, import_obsidian2.moment)(date, "YYYY-MM-DD");
   const now = (0, import_obsidian2.moment)();
   return raw.replace(/{{\s*title\s*}}/gi, basename).replace(/{{\s*date(?::([^}]+))?\s*}}/gi, (_, fmt) => m.format(fmt || "YYYY-MM-DD")).replace(/{{\s*time(?::([^}]+))?\s*}}/gi, (_, fmt) => now.format(fmt || "HH:mm"));
+}
+async function unlinkFromDailyNote(app, date, noteBasename) {
+  var _a;
+  const opts = getDailyNotesOptions(app);
+  const format = opts.format || "YYYY-MM-DD";
+  const folder = ((_a = opts.folder) != null ? _a : "").trim().replace(/\/+$/, "");
+  const dailyName = (0, import_obsidian2.moment)(date, "YYYY-MM-DD").format(format);
+  const path = (0, import_obsidian2.normalizePath)((folder ? folder + "/" : "") + dailyName + ".md");
+  const file = app.vault.getAbstractFileByPath(path);
+  if (!(file instanceof import_obsidian2.TFile)) return;
+  await app.vault.process(file, (content) => removeLogLine(content, noteBasename));
+}
+function removeLogLine(content, noteBasename) {
+  const target = noteBasename.trim();
+  const lines = content.split("\n");
+  const kept = lines.filter((l) => {
+    if (!PLUGIN_LINE.test(l)) return true;
+    const m = l.match(/\[\[([^\]|#]+)(?:[|#][^\]]*)?\]\]/);
+    return !(m && m[1].trim() === target);
+  });
+  return kept.join("\n");
 }
 function insertLogLine(content, line, settings, time) {
   const lines = content.split("\n");
@@ -1638,7 +1659,7 @@ function placeholderFor(status) {
 }
 
 // src/dashboard.ts
-var import_obsidian12 = require("obsidian");
+var import_obsidian13 = require("obsidian");
 
 // src/charts.ts
 var SVG_NS = "http://www.w3.org/2000/svg";
@@ -1986,9 +2007,62 @@ async function exportSummary(app, settings, store) {
   await app.workspace.getLeaf(true).openFile(file);
 }
 
+// src/delete.ts
+var import_obsidian12 = require("obsidian");
+async function trashEntryFile(plugin, entry) {
+  if (plugin.settings.dailyNoteLinking && entry.date) {
+    try {
+      await unlinkFromDailyNote(plugin.app, entry.date, entry.file.basename);
+    } catch (e) {
+      console.error("ARFID Tracker: could not unlink from the daily note", e);
+    }
+  }
+  await plugin.app.fileManager.trashFile(entry.file);
+}
+async function deleteEntry(plugin, entry) {
+  await trashEntryFile(plugin, entry);
+  new import_obsidian12.Notice(`Deleted \u201C${entry.food}\u201D.`);
+  plugin.notifyDataChanged();
+}
+async function deleteFood(plugin, food) {
+  var _a;
+  for (const entry of food.entries) {
+    await trashEntryFile(plugin, entry);
+  }
+  const notes = (_a = plugin.store.getFoodNotesByKey().get(food.key)) != null ? _a : [];
+  for (const note of notes) {
+    if (note.file instanceof import_obsidian12.TFile) await plugin.app.fileManager.trashFile(note.file);
+  }
+  const noteBit = notes.length > 0 ? ` and ${notes.length} note${notes.length === 1 ? "" : "s"}` : "";
+  new import_obsidian12.Notice(`Deleted \u201C${food.name}\u201D \u2014 ${food.entries.length} entr${food.entries.length === 1 ? "y" : "ies"}${noteBit}.`);
+  plugin.notifyDataChanged();
+}
+var ConfirmModal = class extends import_obsidian12.Modal {
+  constructor(app, opts) {
+    super(app);
+    this.opts = opts;
+  }
+  onOpen() {
+    this.contentEl.addClass("arfid-plugin");
+    this.titleEl.setText(this.opts.title);
+    this.contentEl.createDiv({ cls: "arfid-hint", text: this.opts.body });
+    const row = this.contentEl.createDiv({ cls: "arfid-chip-row arfid-confirm-row" });
+    const cancel = row.createEl("button", { cls: "arfid-chip", text: "Cancel" });
+    cancel.addEventListener("click", () => this.close());
+    const confirm = row.createEl("button", { cls: "arfid-chip arfid-chip-danger", text: this.opts.confirmText });
+    confirm.addEventListener("click", async () => {
+      this.close();
+      await this.opts.onConfirm();
+    });
+  }
+  onClose() {
+    this.contentEl.empty();
+  }
+};
+
 // src/dashboard.ts
 var VIEW_TYPE_ARFID = "arfid-dashboard";
-var ArfidDashboardView = class extends import_obsidian12.ItemView {
+var ArfidDashboardView = class extends import_obsidian13.ItemView {
   constructor(leaf, plugin) {
     super(leaf);
     this.tab = "overview";
@@ -2184,6 +2258,20 @@ var ArfidDashboardView = class extends import_obsidian12.ItemView {
             changeBtn.addEventListener("click", () => new StatusChangeModal(this.app, this.plugin, f.name).open());
             const noteBtn = actionRow.createEl("button", { cls: "arfid-chip", text: "+ Ritual / order / recipe" });
             noteBtn.addEventListener("click", () => new FoodNoteModal(this.app, this.plugin, f.name).open());
+            const notesForDelete = notes.length;
+            const delBtn = actionRow.createEl("button", { cls: "arfid-chip arfid-chip-danger", text: "Delete food" });
+            delBtn.addEventListener(
+              "click",
+              () => new ConfirmModal(this.app, {
+                title: `Delete \u201C${f.name}\u201D?`,
+                body: `This moves every entry for this food (${f.entries.length}) ${notesForDelete > 0 ? `and its ${notesForDelete} note${notesForDelete === 1 ? "" : "s"} ` : ""}to trash, and removes it from your library. This can't be undone from here.`,
+                confirmText: "Delete food",
+                onConfirm: async () => {
+                  await deleteFood(this.plugin, f);
+                  this.expandedFood = null;
+                }
+              }).open()
+            );
             for (const n of notes) {
               const noteRow = detail.createDiv({ cls: "arfid-entry-row" });
               noteRow.createSpan({ cls: "arfid-note-badge", text: NOTE_KIND_LABELS[n.kind].toLowerCase() });
@@ -2235,18 +2323,30 @@ var ArfidDashboardView = class extends import_obsidian12.ItemView {
   // ------------------------------------------------------------- shared
   renderEntryRow(parent, e, showFood) {
     const row = parent.createDiv({ cls: "arfid-entry-row" });
-    row.createSpan({ cls: "arfid-entry-when", text: `${e.date} ${e.time}`.trim() });
-    const main = row.createSpan({ cls: "arfid-entry-main" });
+    const open = row.createDiv({ cls: "arfid-entry-open" });
+    open.createSpan({ cls: "arfid-entry-when", text: `${e.date} ${e.time}`.trim() });
+    const main = open.createSpan({ cls: "arfid-entry-main" });
     main.createSpan({ cls: `arfid-status-dot ${statusDotClass(e.status)}` });
     main.createSpan({ text: showFood ? e.food : e.status ? STATUS_LABELS[e.status] : "logged" });
     if (e.kind === "exposure") {
       const step = e.exposureStep ? EXPOSURE_STEP_LABELS[e.exposureStep].toLowerCase() : "";
-      row.createSpan({ cls: "arfid-entry-outcome", text: step ? `exposure \xB7 ${step}` : "exposure" });
+      open.createSpan({ cls: "arfid-entry-outcome", text: step ? `exposure \xB7 ${step}` : "exposure" });
     } else {
       const bits = [e.meal, e.outcome].filter((b) => b);
-      if (bits.length > 0) row.createSpan({ cls: "arfid-entry-outcome", text: bits.join(" \xB7 ") });
+      if (bits.length > 0) open.createSpan({ cls: "arfid-entry-outcome", text: bits.join(" \xB7 ") });
     }
-    row.addEventListener("click", () => void this.app.workspace.getLeaf(false).openFile(e.file));
+    open.addEventListener("click", () => void this.app.workspace.getLeaf(false).openFile(e.file));
+    const del = row.createEl("button", { cls: "arfid-entry-delete", text: "\u2715", attr: { "aria-label": "Delete this entry" } });
+    del.setAttr("title", "Delete this entry");
+    del.addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      new ConfirmModal(this.app, {
+        title: "Delete this entry?",
+        body: `\u201C${e.food}\u201D logged ${`${e.date} ${e.time}`.trim()} will be moved to trash. This can't be undone from here.`,
+        confirmText: "Delete entry",
+        onConfirm: () => deleteEntry(this.plugin, e)
+      }).open();
+    });
   }
   async onClose() {
     this.contentEl.empty();
@@ -2290,7 +2390,7 @@ function trendPerWeek(entries, weeks) {
 }
 
 // src/main.ts
-var ArfidTrackerPlugin = class extends import_obsidian13.Plugin {
+var ArfidTrackerPlugin = class extends import_obsidian14.Plugin {
   constructor() {
     super(...arguments);
     this.settings = DEFAULT_SETTINGS;
@@ -2301,14 +2401,37 @@ var ArfidTrackerPlugin = class extends import_obsidian13.Plugin {
      * and fall back to markdown parsing if it is absent or mismatched.
      */
     this.api = {
-      version: 1,
-      /** Food entries logged on `date` (YYYY-MM-DD), chronological. */
-      getEntriesForDate: (date) => this.store.getEntries().filter((e) => e.date === date).map((e) => ({ date: e.date, time: e.time, food: e.food, meal: e.meal })),
-      /** Compact shape for a dashboard card: today's count and food names. */
+      // v2 adds `kind`/`outcome`/`exposure`/`status` to each entry and a
+      // `consumed` flag on the summary, so a dashboard card can tell an eaten
+      // meal apart from a food merely added to the library or a status change
+      // (which must NOT read as "consumed at the time of logging"). v1 consumers
+      // still get `date`/`time`/`food`/`meal` unchanged.
+      version: 2,
+      /** Food entries logged on `date` (YYYY-MM-DD), chronological. `kind` is
+       * "meal" (eaten/attempted), "exposure", "baseline" (library add — nothing
+       * eaten), or "status-change" (category moved — nothing eaten). */
+      getEntriesForDate: (date) => this.store.getEntries().filter((e) => e.date === date).map((e) => ({
+        date: e.date,
+        time: e.time,
+        food: e.food,
+        meal: e.meal,
+        kind: e.kind,
+        outcome: e.outcome,
+        exposure: e.exposure,
+        status: e.status,
+        consumed: isConsumed(e)
+      })),
+      /** Compact shape for a dashboard card: today's count and food names.
+       * `consumedCount` is how many of those were actually eaten/attempted. */
       getTodaySummary: () => {
         const today = isoDate(/* @__PURE__ */ new Date());
         const entries = this.store.getEntries().filter((e) => e.date === today);
-        return { date: today, count: entries.length, foods: entries.map((e) => e.food) };
+        return {
+          date: today,
+          count: entries.length,
+          consumedCount: entries.filter(isConsumed).length,
+          foods: entries.map((e) => e.food)
+        };
       }
     };
   }

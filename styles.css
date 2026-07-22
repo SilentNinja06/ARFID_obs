@@ -407,6 +407,46 @@
 	flex-shrink: 0;
 }
 
+/* The row splits into a clickable "open the note" area and a delete button, so
+   the two taps never collide. */
+.arfid-entry-open {
+	display: flex;
+	align-items: center;
+	gap: 0.6em;
+	flex: 1;
+	min-width: 0;
+	cursor: pointer;
+}
+.arfid-entry-delete {
+	flex-shrink: 0;
+	background: transparent;
+	border: none;
+	box-shadow: none;
+	color: var(--text-faint);
+	font-size: 1em;
+	line-height: 1;
+	padding: 0.4em 0.5em;
+	border-radius: var(--radius-s, 6px);
+	cursor: pointer;
+}
+.arfid-entry-delete:hover {
+	color: var(--text-error, #e05252);
+	background: var(--background-modifier-error-hover, rgba(224, 82, 82, 0.12));
+}
+
+/* Destructive chip (delete food / confirm delete). */
+.arfid-chip-danger {
+	color: var(--text-error, #e05252);
+	border-color: var(--text-error, #e05252);
+}
+.arfid-chip-danger:hover {
+	background: var(--background-modifier-error-hover, rgba(224, 82, 82, 0.12));
+}
+.arfid-confirm-row {
+	margin-top: 1em;
+	justify-content: flex-end;
+}
+
 .arfid-shift-row {
 	cursor: default;
 }
@@ -636,4 +676,30 @@
 .is-mobile .modal-content.arfid-quicklog {
 	overflow-y: auto;
 	-webkit-overflow-scrolling: touch;
+}
+
+/* --------------------------------------------------------------- settings */
+
+/* The list fields (strategies, contexts, symptoms, reminders, checklists) are
+   multi-line textareas. Obsidian drops a control into the narrow right-hand
+   column, which squeezes an 8-row textarea into a sliver beside the label.
+   Stack these rows so the label sits above a full-width, resizable textarea. */
+.arfid-list-setting {
+	flex-direction: column;
+	align-items: stretch;
+}
+.arfid-list-setting .setting-item-info {
+	margin-right: 0;
+	margin-bottom: 6px;
+}
+.arfid-list-setting .setting-item-control {
+	width: 100%;
+	justify-content: stretch;
+}
+.arfid-list-setting .setting-item-control textarea {
+	width: 100%;
+	box-sizing: border-box;
+	min-height: 5em;
+	resize: vertical;
+	font-family: inherit;
 }

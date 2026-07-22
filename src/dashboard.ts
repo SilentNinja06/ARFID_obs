@@ -22,6 +22,7 @@ import { SymptomModal } from "./symptoms";
 import { FoodNoteModal } from "./foodnote";
 import { StatusChangeModal } from "./statuschange";
 import { AddFoodModal } from "./addfoods";
+import { ConfirmModal, deleteEntry, deleteFood } from "./delete";
 import type ArfidTrackerPlugin from "./main";
 
 export const VIEW_TYPE_ARFID = "arfid-dashboard";
@@ -252,6 +253,19 @@ export class ArfidDashboardView extends ItemView {
 						changeBtn.addEventListener("click", () => new StatusChangeModal(this.app, this.plugin, f.name).open());
 						const noteBtn = actionRow.createEl("button", { cls: "arfid-chip", text: "+ Ritual / order / recipe" });
 						noteBtn.addEventListener("click", () => new FoodNoteModal(this.app, this.plugin, f.name).open());
+						const notesForDelete = notes.length;
+						const delBtn = actionRow.createEl("button", { cls: "arfid-chip arfid-chip-danger", text: "Delete food" });
+						delBtn.addEventListener("click", () =>
+							new ConfirmModal(this.app, {
+								title: `Delete “${f.name}”?`,
+								body: `This moves every entry for this food (${f.entries.length}) ${notesForDelete > 0 ? `and its ${notesForDelete} note${notesForDelete === 1 ? "" : "s"} ` : ""}to trash, and removes it from your library. This can't be undone from here.`,
+								confirmText: "Delete food",
+								onConfirm: async () => {
+									await deleteFood(this.plugin, f);
+									this.expandedFood = null;
+								},
+							}).open()
+						);
 						for (const n of notes) {
 							const noteRow = detail.createDiv({ cls: "arfid-entry-row" });
 							noteRow.createSpan({ cls: "arfid-note-badge", text: NOTE_KIND_LABELS[n.kind].toLowerCase() });
@@ -308,18 +322,31 @@ export class ArfidDashboardView extends ItemView {
 
 	private renderEntryRow(parent: HTMLElement, e: FoodEntry, showFood: boolean): void {
 		const row = parent.createDiv({ cls: "arfid-entry-row" });
-		row.createSpan({ cls: "arfid-entry-when", text: `${e.date} ${e.time}`.trim() });
-		const main = row.createSpan({ cls: "arfid-entry-main" });
+		const open = row.createDiv({ cls: "arfid-entry-open" });
+		open.createSpan({ cls: "arfid-entry-when", text: `${e.date} ${e.time}`.trim() });
+		const main = open.createSpan({ cls: "arfid-entry-main" });
 		main.createSpan({ cls: `arfid-status-dot ${statusDotClass(e.status)}` });
 		main.createSpan({ text: showFood ? e.food : e.status ? STATUS_LABELS[e.status] : "logged" });
 		if (e.kind === "exposure") {
 			const step = e.exposureStep ? EXPOSURE_STEP_LABELS[e.exposureStep].toLowerCase() : "";
-			row.createSpan({ cls: "arfid-entry-outcome", text: step ? `exposure · ${step}` : "exposure" });
+			open.createSpan({ cls: "arfid-entry-outcome", text: step ? `exposure · ${step}` : "exposure" });
 		} else {
 			const bits = [e.meal, e.outcome].filter((b) => b);
-			if (bits.length > 0) row.createSpan({ cls: "arfid-entry-outcome", text: bits.join(" · ") });
+			if (bits.length > 0) open.createSpan({ cls: "arfid-entry-outcome", text: bits.join(" · ") });
 		}
-		row.addEventListener("click", () => void this.app.workspace.getLeaf(false).openFile(e.file));
+		open.addEventListener("click", () => void this.app.workspace.getLeaf(false).openFile(e.file));
+
+		const del = row.createEl("button", { cls: "arfid-entry-delete", text: "✕", attr: { "aria-label": "Delete this entry" } });
+		del.setAttr("title", "Delete this entry");
+		del.addEventListener("click", (ev) => {
+			ev.stopPropagation();
+			new ConfirmModal(this.app, {
+				title: "Delete this entry?",
+				body: `“${e.food}” logged ${`${e.date} ${e.time}`.trim()} will be moved to trash. This can't be undone from here.`,
+				confirmText: "Delete entry",
+				onConfirm: () => deleteEntry(this.plugin, e),
+			}).open();
+		});
 	}
 
 	async onClose(): Promise<void> {
