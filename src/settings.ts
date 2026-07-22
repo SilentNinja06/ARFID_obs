@@ -25,6 +25,7 @@ export class ArfidSettingTab extends PluginSettingTab {
 		new Setting(this.containerEl)
 			.setName(name)
 			.setDesc(desc)
+			.setClass("arfid-list-setting")
 			.addTextArea((t) => {
 				t.setValue(get().join("\n")).onChange(async (v) => {
 					set(
