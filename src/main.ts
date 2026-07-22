@@ -24,12 +24,12 @@ export default class ArfidTrackerPlugin extends Plugin {
 	 * and fall back to markdown parsing if it is absent or mismatched.
 	 */
 	public api = {
-		// v2 adds `kind`/`outcome`/`exposure`/`status` to each entry and a
-		// `consumed` flag on the summary, so a dashboard card can tell an eaten
-		// meal apart from a food merely added to the library or a status change
-		// (which must NOT read as "consumed at the time of logging"). v1 consumers
-		// still get `date`/`time`/`food`/`meal` unchanged.
-		version: 2,
+		// v3 adds `getSymptomsForDate`, so a dashboard card can show symptom logs
+		// alongside food entries and tell them apart. v2 added `kind`/`outcome`/
+		// `exposure`/`status` per entry and a `consumed` flag on the summary, so a
+		// card can tell an eaten meal apart from a food merely added to the library
+		// or a status change. v1 consumers still get `date`/`time`/`food`/`meal`.
+		version: 3,
 		/** Food entries logged on `date` (YYYY-MM-DD), chronological. `kind` is
 		 * "meal" (eaten/attempted), "exposure", "baseline" (library add — nothing
 		 * eaten), or "status-change" (category moved — nothing eaten). */
@@ -48,6 +48,13 @@ export default class ArfidTrackerPlugin extends Plugin {
 					status: e.status,
 					consumed: isConsumed(e),
 				})),
+		/** Symptom logs recorded on `date` (YYYY-MM-DD), chronological. Separate
+		 * from food entries — these are body signals, never food that was eaten. */
+		getSymptomsForDate: (date: string) =>
+			this.store
+				.getSymptomEntries()
+				.filter((e) => e.date === date)
+				.map((e) => ({ date: e.date, time: e.time, symptoms: e.symptoms })),
 		/** Compact shape for a dashboard card: today's count and food names.
 		 * `consumedCount` is how many of those were actually eaten/attempted. */
 		getTodaySummary: () => {
