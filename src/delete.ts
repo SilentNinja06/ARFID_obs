@@ -1,5 +1,5 @@
 import { App, Modal, Notice, TFile } from "obsidian";
-import { FoodEntry, FoodSummary } from "./types";
+import { FoodEntry, FoodSummary, SymptomEntry } from "./types";
 import { unlinkFromDailyNote } from "./dailynote";
 import type ArfidTrackerPlugin from "./main";
 
@@ -23,10 +23,25 @@ async function trashEntryFile(plugin: ArfidTrackerPlugin, entry: FoodEntry): Pro
 	await plugin.app.fileManager.trashFile(entry.file);
 }
 
-/** Delete a single log entry (one note file). */
+/** Delete a single food log entry (one note file). */
 export async function deleteEntry(plugin: ArfidTrackerPlugin, entry: FoodEntry): Promise<void> {
 	await trashEntryFile(plugin, entry);
 	new Notice(`Deleted “${entry.food}”.`);
+	plugin.notifyDataChanged();
+}
+
+/** Delete a single symptom log entry (one note file), unlinking it from the
+ * daily note the same way food entries are. */
+export async function deleteSymptom(plugin: ArfidTrackerPlugin, entry: SymptomEntry): Promise<void> {
+	if (plugin.settings.dailyNoteLinking && entry.date) {
+		try {
+			await unlinkFromDailyNote(plugin.app, entry.date, entry.file.basename);
+		} catch (e) {
+			console.error("ARFID Tracker: could not unlink from the daily note", e);
+		}
+	}
+	await plugin.app.fileManager.trashFile(entry.file);
+	new Notice("Deleted symptom entry.");
 	plugin.notifyDataChanged();
 }
 
