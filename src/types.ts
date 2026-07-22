@@ -77,6 +77,16 @@ export function deriveEntryKind(exposure: boolean, tags: string[]): EntryKind {
 	return "meal";
 }
 
+/** Short badge label for each entry kind, so the log can tell an eaten meal from
+ * a status change or a library add at a glance. Symptom entries aren't food
+ * entries and carry their own "Symptoms" label at the call site. */
+export const ENTRY_KIND_LABELS: Record<EntryKind, string> = {
+	meal: "Meal",
+	exposure: "Exposure",
+	baseline: "Library",
+	"status-change": "Status change",
+};
+
 /** Entries where something was actually consumed or attempted — the only
  * ones that count toward "meals logged" trends. */
 export function isConsumed(e: FoodEntry): boolean {

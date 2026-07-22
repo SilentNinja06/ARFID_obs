@@ -1,5 +1,6 @@
 import { ItemView, WorkspaceLeaf } from "obsidian";
 import {
+	ENTRY_KIND_LABELS,
 	EXPOSURE_STEP_LABELS,
 	FOOD_STATUSES,
 	FoodEntry,
@@ -8,6 +9,7 @@ import {
 	NOTE_KIND_LABELS,
 	NOTE_KINDS,
 	STATUS_LABELS,
+	SymptomEntry,
 	isConsumed,
 	isExpansionShift,
 	statusDotClass,
@@ -22,7 +24,7 @@ import { SymptomModal } from "./symptoms";
 import { FoodNoteModal } from "./foodnote";
 import { StatusChangeModal } from "./statuschange";
 import { AddFoodModal } from "./addfoods";
-import { ConfirmModal, deleteEntry, deleteFood } from "./delete";
+import { ConfirmModal, deleteEntry, deleteFood, deleteSymptom } from "./delete";
 import type ArfidTrackerPlugin from "./main";
 
 export const VIEW_TYPE_ARFID = "arfid-dashboard";
@@ -171,15 +173,31 @@ export class ArfidDashboardView extends ItemView {
 			}
 		}
 
-		// recently logged
+		// recent activity — meals, exposures, status changes and symptoms in one
+		// chronological list, each tagged with what kind of entry it is and each
+		// removable in place. Library (baseline) adds are left out: they aren't
+		// activity, and that's what made them read as consumption before.
 		const recentSection = body.createDiv({ cls: "arfid-section" });
-		recentSection.createEl("h3", { text: "Recently logged" });
-		const recent = [...entries].reverse().filter((e) => e.kind !== "baseline").slice(0, 10);
+		recentSection.createEl("h3", { text: "Recent activity" });
+		recentSection.createDiv({
+			cls: "arfid-hint",
+			text: "Meals, exposures, status changes and symptoms — tagged by type. Tap the ✕ to delete an entry.",
+		});
+		const activity: Array<{ stamp: string; render: (parent: HTMLElement) => void }> = [];
+		for (const e of entries) {
+			if (e.kind === "baseline") continue;
+			activity.push({ stamp: `${e.date} ${e.time}`, render: (p) => this.renderEntryRow(p, e, true) });
+		}
+		for (const sy of this.plugin.store.getSymptomEntries()) {
+			activity.push({ stamp: `${sy.date} ${sy.time}`, render: (p) => this.renderSymptomRow(p, sy) });
+		}
+		activity.sort((a, b) => b.stamp.localeCompare(a.stamp));
+		const recent = activity.slice(0, 12);
 		if (recent.length === 0) {
 			recentSection.createDiv({ cls: "arfid-empty", text: "Nothing logged yet. Tap “+ Log food” to add your first entry." });
 		} else {
 			const list = recentSection.createDiv({ cls: "arfid-entry-list" });
-			for (const e of recent) this.renderEntryRow(list, e, true);
+			for (const r of recent) r.render(list);
 		}
 
 		// export
@@ -323,6 +341,9 @@ export class ArfidDashboardView extends ItemView {
 	private renderEntryRow(parent: HTMLElement, e: FoodEntry, showFood: boolean): void {
 		const row = parent.createDiv({ cls: "arfid-entry-row" });
 		const open = row.createDiv({ cls: "arfid-entry-open" });
+		// Leading type badge so a meal, exposure, status change or library add is
+		// never mistaken for one another.
+		open.createSpan({ cls: `arfid-kind-badge arfid-kind-${e.kind}`, text: ENTRY_KIND_LABELS[e.kind] });
 		open.createSpan({ cls: "arfid-entry-when", text: `${e.date} ${e.time}`.trim() });
 		const main = open.createSpan({ cls: "arfid-entry-main" });
 		main.createSpan({ cls: `arfid-status-dot ${statusDotClass(e.status)}` });
@@ -330,22 +351,53 @@ export class ArfidDashboardView extends ItemView {
 		if (e.kind === "exposure") {
 			const step = e.exposureStep ? EXPOSURE_STEP_LABELS[e.exposureStep].toLowerCase() : "";
 			open.createSpan({ cls: "arfid-entry-outcome", text: step ? `exposure · ${step}` : "exposure" });
+		} else if (e.kind === "status-change") {
+			if (e.status) open.createSpan({ cls: "arfid-entry-outcome", text: `→ ${STATUS_LABELS[e.status].toLowerCase()}` });
+		} else if (e.kind === "baseline") {
+			open.createSpan({ cls: "arfid-entry-outcome", text: "added to library" });
 		} else {
 			const bits = [e.meal, e.outcome].filter((b) => b);
 			if (bits.length > 0) open.createSpan({ cls: "arfid-entry-outcome", text: bits.join(" · ") });
 		}
 		open.addEventListener("click", () => void this.app.workspace.getLeaf(false).openFile(e.file));
 
-		const del = row.createEl("button", { cls: "arfid-entry-delete", text: "✕", attr: { "aria-label": "Delete this entry" } });
-		del.setAttr("title", "Delete this entry");
+		const noun = e.kind === "status-change" ? "status change" : e.kind === "exposure" ? "exposure" : "entry";
+		this.attachDelete(row, {
+			title: `Delete this ${noun}?`,
+			body: `“${e.food}” logged ${`${e.date} ${e.time}`.trim()} will be moved to trash. This can't be undone from here.`,
+			confirmText: `Delete ${noun}`,
+			onConfirm: () => deleteEntry(this.plugin, e),
+		});
+	}
+
+	/** A symptom log entry, in the same activity list as food entries. */
+	private renderSymptomRow(parent: HTMLElement, sy: SymptomEntry): void {
+		const row = parent.createDiv({ cls: "arfid-entry-row" });
+		const open = row.createDiv({ cls: "arfid-entry-open" });
+		open.createSpan({ cls: "arfid-kind-badge arfid-kind-symptom", text: "Symptoms" });
+		open.createSpan({ cls: "arfid-entry-when", text: `${sy.date} ${sy.time}`.trim() });
+		const main = open.createSpan({ cls: "arfid-entry-main" });
+		main.createSpan({ text: sy.symptoms.join(", ") || "symptoms" });
+		open.addEventListener("click", () => void this.app.workspace.getLeaf(false).openFile(sy.file));
+
+		this.attachDelete(row, {
+			title: "Delete these symptoms?",
+			body: `The symptoms logged ${`${sy.date} ${sy.time}`.trim()} will be moved to trash. This can't be undone from here.`,
+			confirmText: "Delete symptoms",
+			onConfirm: () => deleteSymptom(this.plugin, sy),
+		});
+	}
+
+	/** Attach the trailing delete button + confirmation shared by every row. */
+	private attachDelete(
+		row: HTMLElement,
+		opts: { title: string; body: string; confirmText: string; onConfirm: () => void | Promise<void> }
+	): void {
+		const del = row.createEl("button", { cls: "arfid-entry-delete", text: "✕", attr: { "aria-label": opts.title } });
+		del.setAttr("title", opts.title);
 		del.addEventListener("click", (ev) => {
 			ev.stopPropagation();
-			new ConfirmModal(this.app, {
-				title: "Delete this entry?",
-				body: `“${e.food}” logged ${`${e.date} ${e.time}`.trim()} will be moved to trash. This can't be undone from here.`,
-				confirmText: "Delete entry",
-				onConfirm: () => deleteEntry(this.plugin, e),
-			}).open();
+			new ConfirmModal(this.app, opts).open();
 		});
 	}
 

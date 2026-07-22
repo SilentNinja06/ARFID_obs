@@ -434,6 +434,25 @@
 	background: var(--background-modifier-error-hover, rgba(224, 82, 82, 0.12));
 }
 
+/* Type badge: names what each activity row is — meal, exposure, status change,
+   library add, or symptoms — so they're never confused with one another. */
+.arfid-kind-badge {
+	flex: 0 0 auto;
+	font-size: 0.62em;
+	font-weight: 700;
+	letter-spacing: 0.03em;
+	text-transform: uppercase;
+	padding: 0.2em 0.55em;
+	border-radius: 999px;
+	border: 1px solid transparent;
+	white-space: nowrap;
+}
+.arfid-kind-meal { color: var(--arfid-safe); background: color-mix(in srgb, var(--arfid-safe) 14%, transparent); }
+.arfid-kind-exposure { color: var(--arfid-trying); background: color-mix(in srgb, var(--arfid-trying) 14%, transparent); }
+.arfid-kind-status-change { color: var(--arfid-expanded); background: color-mix(in srgb, var(--arfid-expanded) 16%, transparent); }
+.arfid-kind-baseline { color: var(--text-muted); background: var(--background-modifier-border); }
+.arfid-kind-symptom { color: var(--arfid-fear); background: color-mix(in srgb, var(--arfid-fear) 16%, transparent); }
+
 /* Destructive chip (delete food / confirm delete). */
 .arfid-chip-danger {
 	color: var(--text-error, #e05252);
