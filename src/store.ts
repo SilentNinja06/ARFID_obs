@@ -199,24 +199,29 @@ export class EntryStore {
 function parseEntry(file: TFile, fm: Record<string, unknown>): FoodEntry | null {
 	const food = String(fm.food ?? "").trim();
 	if (!food) return null;
-	const exposure = fm.exposure === true || fm.exposure === "true";
+	// Unified schema (docs/frontmatter-schema.md): entry-specific fields live
+	// under a nested `arfid:` block. Read that first, fall back to the legacy
+	// flat keys for any note authored before the frontmatter migration.
+	const a = (fm.arfid ?? {}) as Record<string, unknown>;
+	const exposureRaw = a.exposure ?? fm.exposure;
+	const exposure = exposureRaw === true || exposureRaw === "true";
 	const tags = splitList(fm.tags);
 	return {
 		file,
 		date: normalizeDate(fm.date),
 		time: normalizeTime(fm.time),
 		food,
-		meal: normalizeMeal(fm.meal),
+		meal: normalizeMeal(a.meal ?? fm.meal),
 		status: normalizeStatus(fm.status),
-		outcome: normalizeOutcome(fm.outcome),
+		outcome: normalizeOutcome(a.outcome ?? fm.outcome),
 		kind: deriveEntryKind(exposure, tags),
 		exposure,
-		exposureStep: normalizeExposureStep(fm.exposure_step),
-		statusReason: String(fm.status_reason ?? "").trim(),
-		textureNotes: String(fm.texture_notes ?? ""),
-		context: splitList(fm.context),
-		strategies: splitList(fm.strategy_used),
-		strategyWorked: normalizeWorked(fm.strategy_worked),
+		exposureStep: normalizeExposureStep(a.exposure_step ?? fm.exposure_step),
+		statusReason: String(a.status_reason ?? fm.status_reason ?? "").trim(),
+		textureNotes: String(a.texture_notes ?? fm.texture_notes ?? ""),
+		context: splitList(a.context ?? fm.context),
+		strategies: splitList(a.strategy_used ?? fm.strategy_used),
+		strategyWorked: normalizeWorked(a.strategy_worked ?? fm.strategy_worked),
 		tags,
 	};
 }
