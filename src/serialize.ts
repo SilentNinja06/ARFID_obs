@@ -42,23 +42,30 @@ export interface EntryFields {
 export function buildEntryNote(f: EntryFields): string {
 	const worked =
 		f.strategyWorked === true ? "true" : f.strategyWorked === false ? "false" : '"n/a"';
+	// Unified schema (docs/frontmatter-schema.md): core keys flat; entry-specific
+	// fields nested under `arfid:`. yamlString gets an extra indent so multi-line
+	// block scalars stay valid one level deep.
+	const nest = (v: string) => yamlString(v, "  ");
 	const lines = [
 		"---",
 		"type: food-entry",
 		`date: ${f.date}`,
 		`time: "${f.time}"`,
 		`food: ${yamlString(f.food)}`,
-		`meal: ${f.meal ? f.meal : '""'}`,
 		`status: ${f.status ? f.status : '""'}`,
-		`outcome: ${f.outcome ? f.outcome : '""'}`,
-		`exposure: ${f.exposure ? "true" : "false"}`,
-		`exposure_step: ${f.exposureStep ? f.exposureStep : '""'}`,
-		`status_reason: ${yamlString(f.statusReason)}`,
-		`texture_notes: ${yamlString(f.textureNotes)}`,
-		`context: ${yamlString(f.context.join(", "))}`,
-		`strategy_used: ${yamlString(f.strategies.join(", "))}`,
-		`strategy_worked: ${worked}`,
+		`created: ${f.date}`,
+		`updated: ${f.date}`,
 		`tags: ${yamlList(f.tags)}`,
+		"arfid:",
+		`  meal: ${f.meal ? f.meal : '""'}`,
+		`  outcome: ${f.outcome ? f.outcome : '""'}`,
+		`  exposure: ${f.exposure ? "true" : "false"}`,
+		`  exposure_step: ${f.exposureStep ? f.exposureStep : '""'}`,
+		`  status_reason: ${nest(f.statusReason)}`,
+		`  texture_notes: ${nest(f.textureNotes)}`,
+		`  context: ${nest(f.context.join(", "))}`,
+		`  strategy_used: ${nest(f.strategies.join(", "))}`,
+		`  strategy_worked: ${worked}`,
 		"---",
 		"",
 	];

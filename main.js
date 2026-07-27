@@ -476,27 +476,29 @@ var EntryStore = class {
   }
 };
 function parseEntry(file, fm) {
-  var _a, _b, _c;
+  var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l, _m;
   const food = String((_a = fm.food) != null ? _a : "").trim();
   if (!food) return null;
-  const exposure = fm.exposure === true || fm.exposure === "true";
+  const a = (_b = fm.arfid) != null ? _b : {};
+  const exposureRaw = (_c = a.exposure) != null ? _c : fm.exposure;
+  const exposure = exposureRaw === true || exposureRaw === "true";
   const tags = splitList(fm.tags);
   return {
     file,
     date: normalizeDate(fm.date),
     time: normalizeTime(fm.time),
     food,
-    meal: normalizeMeal(fm.meal),
+    meal: normalizeMeal((_d = a.meal) != null ? _d : fm.meal),
     status: normalizeStatus(fm.status),
-    outcome: normalizeOutcome(fm.outcome),
+    outcome: normalizeOutcome((_e = a.outcome) != null ? _e : fm.outcome),
     kind: deriveEntryKind(exposure, tags),
     exposure,
-    exposureStep: normalizeExposureStep(fm.exposure_step),
-    statusReason: String((_b = fm.status_reason) != null ? _b : "").trim(),
-    textureNotes: String((_c = fm.texture_notes) != null ? _c : ""),
-    context: splitList(fm.context),
-    strategies: splitList(fm.strategy_used),
-    strategyWorked: normalizeWorked(fm.strategy_worked),
+    exposureStep: normalizeExposureStep((_f = a.exposure_step) != null ? _f : fm.exposure_step),
+    statusReason: String((_h = (_g = a.status_reason) != null ? _g : fm.status_reason) != null ? _h : "").trim(),
+    textureNotes: String((_j = (_i = a.texture_notes) != null ? _i : fm.texture_notes) != null ? _j : ""),
+    context: splitList((_k = a.context) != null ? _k : fm.context),
+    strategies: splitList((_l = a.strategy_used) != null ? _l : fm.strategy_used),
+    strategyWorked: normalizeWorked((_m = a.strategy_worked) != null ? _m : fm.strategy_worked),
     tags
   };
 }
@@ -593,23 +595,27 @@ function yamlList(items) {
 function buildEntryNote(f) {
   var _a;
   const worked = f.strategyWorked === true ? "true" : f.strategyWorked === false ? "false" : '"n/a"';
+  const nest = (v) => yamlString(v, "  ");
   const lines = [
     "---",
     "type: food-entry",
     `date: ${f.date}`,
     `time: "${f.time}"`,
     `food: ${yamlString(f.food)}`,
-    `meal: ${f.meal ? f.meal : '""'}`,
     `status: ${f.status ? f.status : '""'}`,
-    `outcome: ${f.outcome ? f.outcome : '""'}`,
-    `exposure: ${f.exposure ? "true" : "false"}`,
-    `exposure_step: ${f.exposureStep ? f.exposureStep : '""'}`,
-    `status_reason: ${yamlString(f.statusReason)}`,
-    `texture_notes: ${yamlString(f.textureNotes)}`,
-    `context: ${yamlString(f.context.join(", "))}`,
-    `strategy_used: ${yamlString(f.strategies.join(", "))}`,
-    `strategy_worked: ${worked}`,
+    `created: ${f.date}`,
+    `updated: ${f.date}`,
     `tags: ${yamlList(f.tags)}`,
+    "arfid:",
+    `  meal: ${f.meal ? f.meal : '""'}`,
+    `  outcome: ${f.outcome ? f.outcome : '""'}`,
+    `  exposure: ${f.exposure ? "true" : "false"}`,
+    `  exposure_step: ${f.exposureStep ? f.exposureStep : '""'}`,
+    `  status_reason: ${nest(f.statusReason)}`,
+    `  texture_notes: ${nest(f.textureNotes)}`,
+    `  context: ${nest(f.context.join(", "))}`,
+    `  strategy_used: ${nest(f.strategies.join(", "))}`,
+    `  strategy_worked: ${worked}`,
     "---",
     ""
   ];
