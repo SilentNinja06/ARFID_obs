@@ -1,3 +1,8 @@
+> [!note] Archived mirror — development moved to the monorepo
+> **arfid-tracker** now lives in the [obsidian-workspace monorepo](https://github.com/SilentNinja06/obsidian_workspace.obs) at `plugins/food`, alongside the other plugins and the shared `@obsidian-workspace/*` packages. Please open issues and PRs there.
+>
+> This repository is kept as an **archived mirror** so existing BRAT installs keep resolving from its releases. New releases are cut from the monorepo.
+
 # ARFID Tracker
 
 An Obsidian plugin for tracking safe/fear foods, exposures, and meals — built to
